@@ -5,6 +5,9 @@ on:
     branches: [ master ]
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
 
+env:
+  GO_VERSION: '1.25.1'
+
 jobs:
 
   build-linux-amd64:
@@ -15,12 +18,13 @@ jobs:
     steps:
 
     - name: Clone Repo
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
-    - name: Go 1.18
-      uses: actions/setup-go@v2
+    - name: Setup Go
+      uses: actions/setup-go@v5
       with:
-        go-version: '1.18.5'
+        go-version: ${{ env.GO_VERSION }}
+        check-latest: true
 
     - name: OS Packages
       run: |
@@ -48,7 +52,7 @@ jobs:
         zip -j sgn_linux-amd64.zip ./sgn
 
     - name: Linux Artifacts (AMD64)
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: linux-amd64
         path: ./sgn_linux-amd64.zip
@@ -60,7 +64,7 @@ jobs:
 
     steps:
       - name: Clone Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - uses: uraimo/run-on-arch-action@v2
         name: Run Commands
@@ -76,9 +80,9 @@ jobs:
 
             mkdir -p /opt/go
             cd /opt/go
-            wget -c https://golang.org/dl/go1.18.5.linux-arm64.tar.gz
-            tar -C /opt/go -xzf go1.18.5.linux-arm64.tar.gz
-            rm -f go1.18.5.linux-arm64.tar.gz
+            wget -c https://go.dev/dl/go${{ env.GO_VERSION }}.linux-arm64.tar.gz
+            tar -C /opt/go -xzf go${{ env.GO_VERSION }}.linux-arm64.tar.gz
+            rm -f go${{ env.GO_VERSION }}.linux-arm64.tar.gz
             export PATH=$PATH:/opt/go/go/bin
             go version
 
@@ -103,7 +107,7 @@ jobs:
           zip -j sgn_linux-arm64.zip ./sgn
 
       - name: Linux Artifacts (ARM64)
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: linux-arm64
           path: ./sgn_linux-arm64.zip
@@ -116,12 +120,13 @@ jobs:
     steps:
 
     - name: Clone Repo
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
-    - name: Go 1.18
-      uses: actions/setup-go@v2
+    - name: Setup Go
+      uses: actions/setup-go@v5
       with:
-        go-version: '1.18.5'
+        go-version: ${{ env.GO_VERSION }}
+        check-latest: true
 
     - name: OS Packages
       run: |
@@ -147,7 +152,7 @@ jobs:
         zip -j sgn_windows-amd64.zip ./sgn.exe ./keystone.dll
 
     - name: Windows Artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: windows-amd64
         path: ./sgn_windows-amd64.zip
@@ -160,12 +165,13 @@ jobs:
     steps:
 
     - name: Clone Repo
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
-    - name: Go 1.18
-      uses: actions/setup-go@v2
+    - name: Setup Go
+      uses: actions/setup-go@v5
       with:
-        go-version: '1.18.5'
+        go-version: ${{ env.GO_VERSION }}
+        check-latest: true
 
     - name: OS Packages
       run: |
@@ -199,13 +205,13 @@ jobs:
         rm -f ./sgn
 
     - name: MacOS Artifacts (AMD64)
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: macos-amd64
         path:  ./sgn_macos-amd64.zip
 
     - name: MacOS Artifacts (ARM64)
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: macos-arm64
         path:  ./sgn_macos-arm64.zip
@@ -221,7 +227,7 @@ jobs:
 
     steps:
     - run: mkdir -p ./builds
-    - uses: actions/download-artifact@v3
+    - uses: actions/download-artifact@v4
       with:
         path: ./builds
 
