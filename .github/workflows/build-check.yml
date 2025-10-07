@@ -33,11 +33,10 @@ jobs:
     - name: Build Keystone
       run: |
         git clone https://github.com/EgeBalci/keystone
+        python3 -c "from pathlib import Path; p = Path('keystone/make-lib.sh'); text = p.read_text(); needle = 'cmake -DBUILD_LIBS_ONLY='; replacement = 'cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DBUILD_LIBS_ONLY='; p.write_text(text.replace(needle, replacement, 1))"
         mkdir keystone/build
         cd keystone/build
         ../make-lib.sh
-        cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DLLVM_TARGETS_TO_BUILD="X86" -G "Unix Makefiles" ..
-        make -j8
         sudo make install
         sudo ldconfig
 
@@ -76,11 +75,10 @@ jobs:
 
             cd ~
             git clone https://github.com/EgeBalci/keystone
+            python3 -c "from pathlib import Path; p = Path('keystone/make-lib.sh'); text = p.read_text(); needle = 'cmake -DBUILD_LIBS_ONLY='; replacement = 'cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DBUILD_LIBS_ONLY='; p.write_text(text.replace(needle, replacement, 1))"
             mkdir keystone/build
             cd keystone/build
             ../make-lib.sh
-            cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DLLVM_TARGETS_TO_BUILD="AArch64" -G "Unix Makefiles" ..
-            make -j8
             make install
             ldconfig
           run: |
@@ -146,11 +144,10 @@ jobs:
     - name: Build Keystone
       run: |
         git clone https://github.com/EgeBalci/keystone
+        python3 -c "from pathlib import Path; p = Path('keystone/make-lib.sh'); text = p.read_text(); needle = 'cmake -DBUILD_LIBS_ONLY='; replacement = 'cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DBUILD_LIBS_ONLY='; p.write_text(text.replace(needle, replacement, 1))"
         mkdir keystone/build
         cd keystone/build
         ../make-lib.sh
-        cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DLLVM_TARGETS_TO_BUILD="all" -G "Unix Makefiles" ..
-        make -j8
         sudo make install
 
     - name: Build SGN AMD64
