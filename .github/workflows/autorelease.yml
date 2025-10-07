@@ -33,7 +33,7 @@ jobs:
     - name: Build Keystone
       run: |
         git clone https://github.com/EgeBalci/keystone
-        python3 -c "from pathlib import Path; p = Path('keystone/make-lib.sh'); text = p.read_text(); needle = 'cmake -DBUILD_LIBS_ONLY='; replacement = 'cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DBUILD_LIBS_ONLY='; p.write_text(text.replace(needle, replacement, 1))"
+        python3 -c "from pathlib import Path; p = Path('keystone/make-lib.sh'); text = p.read_text(); needle = 'cmake -DBUILD_LIBS_ONLY='; assert needle in text, 'missing keystone cmake invocation'; replacement = 'cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_POLICY_DEFAULT_CMP0148=NEW -Wno-dev -DBUILD_LIBS_ONLY='; p.write_text(text.replace(needle, replacement, 1))"
         mkdir keystone/build
         cd keystone/build
         ../make-lib.sh
@@ -57,46 +57,36 @@ jobs:
 
   build-linux-arm64:
     name: Build Linux ARM64
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04-arm64
     timeout-minutes: 90
 
     steps:
       - name: Clone Repo
         uses: actions/checkout@v4
-
-      - uses: uraimo/run-on-arch-action@v2
-        name: Run Commands
-        id: runcmd
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          arch: aarch64
-          distro: ubuntu22.04
-          dockerRunArgs: |
-            --volume "${PWD}:/workdir"
-          install: |
-            apt-get update
-            apt-get -y install wget tar build-essential cmake git libcapstone-dev python3 time
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
 
-            mkdir -p /opt/go
-            cd /opt/go
-            wget -c https://go.dev/dl/go${{ env.GO_VERSION }}.linux-arm64.tar.gz
-            tar -C /opt/go -xzf go${{ env.GO_VERSION }}.linux-arm64.tar.gz
-            rm -f go${{ env.GO_VERSION }}.linux-arm64.tar.gz
-            export PATH=$PATH:/opt/go/go/bin
-            go version
+      - name: OS Packages
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install build-essential cmake git libcapstone-dev python3 time
 
-            cd ~
-            git clone https://github.com/EgeBalci/keystone
-            python3 -c "from pathlib import Path; p = Path('keystone/make-lib.sh'); text = p.read_text(); needle = 'cmake -DBUILD_LIBS_ONLY='; replacement = 'cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DBUILD_LIBS_ONLY='; p.write_text(text.replace(needle, replacement, 1))"
-            mkdir keystone/build
-            cd keystone/build
-            ../make-lib.sh
-            make install
-            ldconfig
-          run: |
-            export PATH=$PATH:/opt/go/go/bin
-            cd /workdir
-            ls -alh
-            GOOS=linux GOARCH=arm64 CGO_ENABLED=1 go build -buildvcs=false -ldflags="-s -w -extldflags=-static" -trimpath -o sgn_linux-arm64
+      - name: Build Keystone
+        run: |
+          git clone https://github.com/EgeBalci/keystone
+          python3 -c "from pathlib import Path; p = Path('keystone/make-lib.sh'); text = p.read_text(); needle = 'cmake -DBUILD_LIBS_ONLY='; assert needle in text, 'missing keystone cmake invocation'; replacement = 'cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_POLICY_DEFAULT_CMP0148=NEW -Wno-dev -DBUILD_LIBS_ONLY='; p.write_text(text.replace(needle, replacement, 1))"
+          mkdir keystone/build
+          cd keystone/build
+          ../make-lib.sh
+          sudo make install
+          sudo ldconfig
+
+      - name: Build SGN Linux ARM64
+        run: |
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=1 go build -buildvcs=false -ldflags="-s -w -extldflags=-static" -trimpath -o sgn_linux-arm64
 
       - name: Compress
         run: |
@@ -177,7 +167,7 @@ jobs:
     - name: Build Keystone
       run: |
         git clone https://github.com/EgeBalci/keystone
-        python3 -c "from pathlib import Path; p = Path('keystone/make-lib.sh'); text = p.read_text(); needle = 'cmake -DBUILD_LIBS_ONLY='; replacement = 'cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DBUILD_LIBS_ONLY='; p.write_text(text.replace(needle, replacement, 1))"
+        python3 -c "from pathlib import Path; p = Path('keystone/make-lib.sh'); text = p.read_text(); needle = 'cmake -DBUILD_LIBS_ONLY='; assert needle in text, 'missing keystone cmake invocation'; replacement = 'cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_POLICY_DEFAULT_CMP0148=NEW -Wno-dev -DBUILD_LIBS_ONLY='; p.write_text(text.replace(needle, replacement, 1))"
         mkdir keystone/build
         cd keystone/build
         ../make-lib.sh
