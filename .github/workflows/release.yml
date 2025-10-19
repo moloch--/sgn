@@ -99,14 +99,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Prepare Keystone Module
-        run: |
-          set -euo pipefail
-          wasm_url="https://github.com/moloch--/keystone/releases/download/${KEYSTONE_WASM_VERSION}/keystone.wasm"
-          mkdir -p wasm dist/wasm
-          curl --fail --location --silent --show-error "${wasm_url}" -o wasm/keystone.wasm
-          cp wasm/keystone.wasm dist/wasm/keystone.wasm
-
       - name: Go Build
         run: |
           set -euo pipefail
@@ -142,14 +134,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Prepare Keystone Module
-        run: |
-          set -euo pipefail
-          wasm_url="https://github.com/moloch--/keystone/releases/download/${KEYSTONE_WASM_VERSION}/keystone.wasm"
-          mkdir -p wasm dist/wasm
-          curl --fail --location --silent --show-error "${wasm_url}" -o wasm/keystone.wasm
-          cp wasm/keystone.wasm dist/wasm/keystone.wasm
-
       - name: Go Build
         run: |
           set -euo pipefail
@@ -184,14 +168,6 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-
-      - name: Prepare Keystone Module
-        run: |
-          set -euo pipefail
-          wasm_url="https://github.com/moloch--/keystone/releases/download/${KEYSTONE_WASM_VERSION}/keystone.wasm"
-          mkdir -p wasm dist/wasm
-          curl --fail --location --silent --show-error "${wasm_url}" -o wasm/keystone.wasm
-          cp wasm/keystone.wasm dist/wasm/keystone.wasm
 
       - name: Go Build
         run: |
@@ -233,14 +209,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Prepare Keystone Module
-        run: |
-          set -euo pipefail
-          wasm_url="https://github.com/moloch--/keystone/releases/download/${KEYSTONE_WASM_VERSION}/keystone.wasm"
-          mkdir -p wasm dist/wasm
-          curl --fail --location --silent --show-error "${wasm_url}" -o wasm/keystone.wasm
-          cp wasm/keystone.wasm dist/wasm/keystone.wasm
-
       - name: Go Build
         run: |
           set -euo pipefail
@@ -280,14 +248,6 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-
-      - name: Prepare Keystone Module
-        run: |
-          set -euo pipefail
-          wasm_url="https://github.com/moloch--/keystone/releases/download/${KEYSTONE_WASM_VERSION}/keystone.wasm"
-          mkdir -p wasm dist/wasm
-          curl --fail --location --silent --show-error "${wasm_url}" -o wasm/keystone.wasm
-          cp wasm/keystone.wasm dist/wasm/keystone.wasm
 
       - name: Go Build
         run: |

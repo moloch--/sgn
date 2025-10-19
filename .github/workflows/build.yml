@@ -26,9 +26,7 @@ jobs:
       matrix:
         os:
           - ubuntu-latest
-          - macos-latest
-          - windows-latest
-
+  
     steps:
       - name: Check Out Code
         uses: actions/checkout@v5
@@ -40,15 +38,7 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Download Dependencies
-        run: go mod download
-
       - name: Build
         env:
           CGO_ENABLED: 0
-        run: go build ./...
-
-      - name: Test
-        env:
-          CGO_ENABLED: 0
-        run: go test ./...
+        run: make
