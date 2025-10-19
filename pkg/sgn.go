@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 
-	"github.com/EgeBalci/keystone-go"
+	keystone "github.com/moloch--/go-keystone"
 )
 
 // REG structure for registers
@@ -197,7 +197,7 @@ func (encoder Encoder) Assemble(asm string) ([]byte, bool) {
 		return nil, false
 	}
 
-	ks, err := keystone.New(keystone.ARCH_X86, mode)
+	ks, err := keystone.NewEngine(keystone.ARCH_X86, mode)
 	if err != nil {
 		return nil, false
 	}
@@ -210,8 +210,8 @@ func (encoder Encoder) Assemble(asm string) ([]byte, bool) {
 		return nil, false
 	}
 	//log.Println(asm)
-	bin, _, ok := ks.Assemble(asm, 0)
-	return bin, ok
+	bin, err := ks.Assemble(asm, 0)
+	return bin, err == nil
 }
 
 // GetAssemblySize assembes the given  instructions and returns the total instruction size
@@ -227,7 +227,7 @@ func (encoder Encoder) GetAssemblySize(asm string) int {
 		return -1
 	}
 
-	ks, err := keystone.New(keystone.ARCH_X86, mode)
+	ks, err := keystone.NewEngine(keystone.ARCH_X86, mode)
 	if err != nil {
 		return -1
 	}
@@ -240,9 +240,8 @@ func (encoder Encoder) GetAssemblySize(asm string) int {
 		return -1
 	}
 	//log.Println(asm)
-	bin, _, ok := ks.Assemble(asm, 0)
-
-	if !ok {
+	bin, err := ks.Assemble(asm, 0)
+	if err != nil {
 		return -1
 	}
 	return len(bin)
