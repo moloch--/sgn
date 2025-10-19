@@ -1,0 +1,358 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_VERSION: ${{ github.ref_name }}
+  KEYSTONE_WASM_VERSION: v0.0.2
+  BINARY_NAME: sgn
+
+jobs:
+  linux-builds:
+    name: Linux Builds
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      matrix:
+        goos: [linux]
+        goarch:
+          - 386
+          - amd64
+          - arm64
+          - mips
+          - mips64
+          - mips64le
+          - mipsle
+          - ppc64
+          - ppc64le
+          - riscv64
+          - s390x
+
+    steps:
+      - name: Check Out Code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Prepare Keystone Module
+        run: |
+          set -euo pipefail
+          wasm_url="https://github.com/moloch--/keystone/releases/download/${KEYSTONE_WASM_VERSION}/keystone.wasm"
+          mkdir -p wasm dist/wasm
+          curl --fail --location --silent --show-error "${wasm_url}" -o wasm/keystone.wasm
+          cp wasm/keystone.wasm dist/wasm/keystone.wasm
+
+      - name: Go Build
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          output="dist/${BINARY_NAME}_${{ matrix.goos }}-${{ matrix.goarch }}"
+          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build \
+            -trimpath \
+            -ldflags "-s -w -X github.com/moloch--/sgn/config.Version=${RELEASE_VERSION}" \
+            -o "${output}" \
+            .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/${{ env.BINARY_NAME }}_${{ matrix.goos }}-${{ matrix.goarch }}
+          if-no-files-found: error
+          retention-days: 5
+
+  bsd-builds:
+    name: BSD Builds
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      matrix:
+        goos: [darwin, freebsd, openbsd, netbsd]
+        goarch: [amd64, arm64]
+
+    steps:
+      - name: Check Out Code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Prepare Keystone Module
+        run: |
+          set -euo pipefail
+          wasm_url="https://github.com/moloch--/keystone/releases/download/${KEYSTONE_WASM_VERSION}/keystone.wasm"
+          mkdir -p wasm dist/wasm
+          curl --fail --location --silent --show-error "${wasm_url}" -o wasm/keystone.wasm
+          cp wasm/keystone.wasm dist/wasm/keystone.wasm
+
+      - name: Go Build
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          output="dist/${BINARY_NAME}_${{ matrix.goos }}-${{ matrix.goarch }}"
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build \
+            -trimpath \
+            -ldflags "-s -w -X github.com/moloch--/sgn/config.Version=${RELEASE_VERSION}" \
+            -o "${output}" \
+            .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/${{ env.BINARY_NAME }}_${{ matrix.goos }}-${{ matrix.goarch }}
+          if-no-files-found: error
+          retention-days: 5
+
+  ios-build:
+    name: iOS Build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-latest-xlarge
+    timeout-minutes: 10
+    steps:
+      - name: Check Out Code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Prepare Keystone Module
+        run: |
+          set -euo pipefail
+          wasm_url="https://github.com/moloch--/keystone/releases/download/${KEYSTONE_WASM_VERSION}/keystone.wasm"
+          mkdir -p wasm dist/wasm
+          curl --fail --location --silent --show-error "${wasm_url}" -o wasm/keystone.wasm
+          cp wasm/keystone.wasm dist/wasm/keystone.wasm
+
+      - name: Go Build
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          output="dist/${BINARY_NAME}_ios-arm64"
+          CGO_ENABLED=1 GOOS=ios GOARCH=arm64 go build \
+            -trimpath \
+            -ldflags "-s -w -X github.com/moloch--/sgn/config.Version=${RELEASE_VERSION}" \
+            -o "${output}" \
+            .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-ios-arm64
+          path: dist/${{ env.BINARY_NAME }}_ios-arm64
+          if-no-files-found: error
+          retention-days: 5
+
+  android-build:
+    name: Android Build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check Out Code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Prepare Keystone Module
+        run: |
+          set -euo pipefail
+          wasm_url="https://github.com/moloch--/keystone/releases/download/${KEYSTONE_WASM_VERSION}/keystone.wasm"
+          mkdir -p wasm dist/wasm
+          curl --fail --location --silent --show-error "${wasm_url}" -o wasm/keystone.wasm
+          cp wasm/keystone.wasm dist/wasm/keystone.wasm
+
+      - name: Go Build
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          output="dist/${BINARY_NAME}_android-arm64"
+          CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build \
+            -trimpath \
+            -ldflags "-s -w -X github.com/moloch--/sgn/config.Version=${RELEASE_VERSION}" \
+            -o "${output}" \
+            .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-android-arm64
+          path: dist/${{ env.BINARY_NAME }}_android-arm64
+          if-no-files-found: error
+          retention-days: 5
+
+  other-builds:
+    name: Other Builds
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      matrix:
+        goos: [dragonfly, plan9, solaris]
+        goarch: [amd64]
+
+    steps:
+      - name: Check Out Code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Prepare Keystone Module
+        run: |
+          set -euo pipefail
+          wasm_url="https://github.com/moloch--/keystone/releases/download/${KEYSTONE_WASM_VERSION}/keystone.wasm"
+          mkdir -p wasm dist/wasm
+          curl --fail --location --silent --show-error "${wasm_url}" -o wasm/keystone.wasm
+          cp wasm/keystone.wasm dist/wasm/keystone.wasm
+
+      - name: Go Build
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          output="dist/${BINARY_NAME}_${{ matrix.goos }}-${{ matrix.goarch }}"
+          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build \
+            -trimpath \
+            -ldflags "-s -w -X github.com/moloch--/sgn/config.Version=${RELEASE_VERSION}" \
+            -o "${output}" \
+            .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/${{ env.BINARY_NAME }}_${{ matrix.goos }}-${{ matrix.goarch }}
+          if-no-files-found: error
+          retention-days: 5
+
+  windows-builds:
+    name: Windows Builds
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      matrix:
+        goos: [windows]
+        goarch: [386, amd64, arm64]
+
+    steps:
+      - name: Check Out Code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Prepare Keystone Module
+        run: |
+          set -euo pipefail
+          wasm_url="https://github.com/moloch--/keystone/releases/download/${KEYSTONE_WASM_VERSION}/keystone.wasm"
+          mkdir -p wasm dist/wasm
+          curl --fail --location --silent --show-error "${wasm_url}" -o wasm/keystone.wasm
+          cp wasm/keystone.wasm dist/wasm/keystone.wasm
+
+      - name: Go Build
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          output="dist/${BINARY_NAME}_${{ matrix.goos }}-${{ matrix.goarch }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            output="${output}.exe"
+          fi
+          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build \
+            -trimpath \
+            -ldflags "-s -w -X github.com/moloch--/sgn/config.Version=${RELEASE_VERSION}" \
+            -o "${output}" \
+            .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/${{ env.BINARY_NAME }}_${{ matrix.goos }}-${{ matrix.goarch }}.exe
+          if-no-files-found: error
+          retention-days: 5
+
+  tagged-release:
+    needs:
+      - linux-builds
+      - bsd-builds
+      - ios-build
+      - android-build
+      - other-builds
+      - windows-builds
+    name: Tagged Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check Out Code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Collect Artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: release
+          pattern: build-*
+          merge-multiple: true
+
+      - name: Publish Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ env.RELEASE_VERSION }}
+        run: |
+          set -euo pipefail
+          mapfile -t release_files < <(find release -type f -print)
+          if [ ${#release_files[@]} -eq 0 ]; then
+            echo "No release artifacts found in release/" >&2
+            exit 1
+          fi
+
+          if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
+            gh release upload "${TAG_NAME}" "${release_files[@]}" --clobber
+          else
+            gh release create "${TAG_NAME}" \
+              --title "${TAG_NAME}" \
+              --generate-notes \
+              "${release_files[@]}"
+          fi
