@@ -31,9 +31,10 @@ int main(int argc, char **argv) {
     void *mem = mmap(0, len, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
     if (mem == MAP_FAILED) return 5;
     memcpy(mem, buf, n);
-    if (mprotect(mem, len, PROT_READ|PROT_EXEC) != 0) return 6;
+    /* SGN decodes in place, so the mapping must remain writable at runtime. */
+    if (mprotect(mem, len, PROT_READ|PROT_WRITE|PROT_EXEC) != 0) return 6;
     unsigned int result;
-    __asm__ volatile("call *%1" : "=a"(result) : "r"(mem) : "ecx","edx","memory");
+    __asm__ volatile("call *%1" : "=a"(result) : "r"(mem) : "ecx","edx","memory","cc");
     return (result == 0x1337c0de) ? 0 : 1;
 }
 "#;
@@ -101,30 +102,33 @@ fn x86_shellcode_executes() {
     };
 
     let bin = dir.join("sc.bin");
-    let modes: [&dyn Fn(&mut Encoder); 4] = [
-        &|_e: &mut Encoder| {},
-        &|e: &mut Encoder| e.plain_decoder = true,
-        &|e: &mut Encoder| e.encoding_count = 3,
-        &|e: &mut Encoder| e.obfuscation_limit = 0,
+    let modes: [(&str, &dyn Fn(&mut Encoder)); 4] = [
+        ("default", &|_e: &mut Encoder| {}),
+        ("plain", &|e: &mut Encoder| e.plain_decoder = true),
+        ("three-layers", &|e: &mut Encoder| e.encoding_count = 3),
+        ("no-obfuscation", &|e: &mut Encoder| e.obfuscation_limit = 0),
     ];
 
     let mut runs = 0;
-    for cfg in modes {
-        for _ in 0..60 {
+    for (mode, cfg) in modes {
+        for seed_byte in 0..=u8::MAX {
             let mut enc = Encoder::new(32).unwrap();
             enc.obfuscation_limit = 50;
+            enc.seed = seed_byte;
             cfg(&mut enc);
-            let code = trampoline32(&enc.encode(PAYLOAD).unwrap());
+            let random_seed = [seed_byte; sgn::RANDOM_SEED_SIZE];
+            let code = trampoline32(&enc.encode_with_seed(PAYLOAD, random_seed).unwrap());
             std::fs::write(&bin, &code).unwrap();
             let status = Command::new(&harness).arg(&bin).status().unwrap();
             assert!(
                 status.success(),
-                "32-bit shellcode did not decode to the expected value"
+                "32-bit shellcode did not decode to the expected value: \
+                 mode={mode}, seed={seed_byte:#04x}, status={status:?}"
             );
             runs += 1;
         }
     }
 
     let _ = std::fs::remove_dir_all(&dir);
-    assert_eq!(runs, 240);
+    assert_eq!(runs, modes.len() * (u8::MAX as usize + 1));
 }

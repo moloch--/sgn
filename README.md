@@ -284,7 +284,9 @@ Native Rust tests include cipher round trips and real execution tests. The x86
 execution harness skips automatically when a 32-bit C toolchain is unavailable
 for local development. CI installs that toolchain and sets
 `SGN_REQUIRE_EXECUTION=1`, so either x86 or x64 execution being unavailable is a
-test failure rather than a silent skip.
+test failure rather than a silent skip. The x86 harness executes 1,024
+replayable fixed-seed variants across four encoder modes and every initial ADFL
+key byte; production encoding continues to use operating-system randomness.
 
 ## Notes on the Rust port
 

@@ -51,7 +51,8 @@ unsafe fn run(shell: &[u8]) -> Option<u64> {
     let page = libc::sysconf(libc::_SC_PAGESIZE) as usize;
     let len = code.len().div_ceil(page) * page;
 
-    // Try a directly-RWX mapping first; fall back to RW + mprotect(RX).
+    // Try a directly-RWX mapping first; fall back to RW + mprotect(RWX).
+    // SGN's decoder writes into its own encoded bytes while executing.
     let mut mem = libc::mmap(
         std::ptr::null_mut(),
         len,
@@ -73,7 +74,12 @@ unsafe fn run(shell: &[u8]) -> Option<u64> {
             return None;
         }
         std::ptr::copy_nonoverlapping(code.as_ptr(), mem as *mut u8, code.len());
-        if libc::mprotect(mem, len, libc::PROT_READ | libc::PROT_EXEC) != 0 {
+        if libc::mprotect(
+            mem,
+            len,
+            libc::PROT_READ | libc::PROT_WRITE | libc::PROT_EXEC,
+        ) != 0
+        {
             libc::munmap(mem, len);
             return None;
         }
