@@ -136,19 +136,23 @@ macro_rules! schema_step {
 
 /// Builds the schema decoder around a schema-ciphered `blob`.
 ///
-/// Layout produced (the CALL jumps over the data region):
+/// Layout produced (the initial jump reaches a call that points `base` at the
+/// data placed after the decoder):
 /// ```text
-///   call code
-///   <garbage prefix> <ciphered blob> <garbage suffix>   ; data, jumped over
-/// code:
-///   pop  base                     ; base -> start of garbage prefix
+///   jmp  callsite
+/// decoder:
+///   pop  base                     ; base -> start of garbage/data
 ///   (garbage) OP dword[base+off]  ; one decrypt step per schema block
 ///   ...
 ///   jmp  base                     ; run the now-decrypted stub
+/// callsite:
+///   call decoder
+///   <garbage prefix> <garbage suffix> <ciphered blob>
 /// ```
-/// The decrypt steps target the blob, which begins right after the prefix, so
-/// `off` starts at `prefix.len()`. All garbage is value-preserving, so `base`
-/// survives until the final jump.
+/// The call's return address is the start of the data. Both garbage blocks are
+/// placed before the blob, so decoded payloads that fall through do so at the
+/// end of the complete output rather than re-entering decoder code. All
+/// garbage is value-preserving, so `base` survives until the final jump.
 pub fn add_schema_decoder<R: Rng>(
     rng: &mut R,
     arch: u32,
@@ -159,16 +163,14 @@ pub fn add_schema_decoder<R: Rng>(
     let prefix = generate_garbage(rng, arch, obfuscation_limit)?;
     let suffix = generate_garbage(rng, arch, obfuscation_limit)?;
     let base = random_base(rng, arch);
-    let start_off = prefix.len();
+    let start_off = prefix.len() + suffix.len();
 
     let mut a = CodeAssembler::new(arch)?;
-    let mut code = a.create_label();
+    let mut decoder = a.create_label();
+    let mut callsite = a.create_label();
 
-    a.call(code)?;
-    a.db(&prefix)?;
-    a.db(&blob)?;
-    a.db(&suffix)?;
-    a.set_label(&mut code)?;
+    a.jmp(callsite)?;
+    a.set_label(&mut decoder)?;
 
     if arch == 64 {
         a.pop(reg64(base))?;
@@ -199,5 +201,33 @@ pub fn add_schema_decoder<R: Rng>(
         a.jmp(reg32(base))?;
     }
 
+    a.set_label(&mut callsite)?;
+    a.call(decoder)?;
+    a.db(&prefix)?;
+    a.db(&suffix)?;
+    a.db(&blob)?;
+
     Ok(a.assemble(0)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::SeedableRng;
+    use rand_chacha::ChaCha20Rng;
+
+    #[test]
+    fn schema_decoder_keeps_fallthrough_after_blob() {
+        let blob = vec![0xde, 0xad, 0xbe, 0xef];
+        let schema = vec![SchemaOp::Xor(0xa5a5_5a5a)];
+
+        for arch in [32, 64] {
+            let mut rng = ChaCha20Rng::from_seed([0x42; 32]);
+            let output = add_schema_decoder(&mut rng, arch, 0, blob.clone(), &schema).unwrap();
+            assert!(
+                output.ends_with(&blob),
+                "x{arch} schema wrapper put decoder bytes after the blob"
+            );
+        }
+    }
 }

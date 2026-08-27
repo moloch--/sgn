@@ -57,10 +57,18 @@ test-rust:
 test-go: wasm-verify
 	$(GO) test $(GO_TEST_FLAGS) ./...
 
+# Execute every fixed-seed x64 corpus output produced by the embedded Wasm.
+test-wasm-execution: wasm-verify
+	@test "$$($(GO) env GOOS)/$$($(GO) env GOARCH)" = "linux/amd64" || { \
+		echo "test-wasm-execution requires linux/amd64" >&2; \
+		exit 1; \
+	}
+	SGN_REQUIRE_EXECUTION=1 $(GO) test ./pkg -run '^TestWASMEncodeWithSeedX64ExecutionCorpus$$' -count=1
+
 # Compare native Rust and embedded Rust/Wasm byte-for-byte under fixed seeds.
 test-compat: wasm-verify
 	$(CARGO) build --locked --release --example compat_oracle
-	SGN_NATIVE_ORACLE="$(COMPAT_ORACLE)" $(GO) test ./pkg -run '^(TestNativeRustWASMCompatibility|TestUpstreamRustGoldenVector)$$' -count=1
+	SGN_NATIVE_ORACLE="$(COMPAT_ORACLE)" $(GO) test ./pkg -run '^(TestNativeRustWASMCompatibility|TestUpstreamRustGoldenVector|TestFixedSchemaGoldenVector)$$' -count=1
 
 test: test-rust test-go test-compat
 
@@ -94,5 +102,5 @@ clean:
 
 .PHONY: \
 	build clean darwin_amd64 default go-build linux_386 linux_amd64 static test \
-	test-compat test-go test-rust wasm-build wasm-update wasm-verify windows_386 \
-	windows_amd64 386
+	test-compat test-go test-rust test-wasm-execution wasm-build wasm-update \
+	wasm-verify windows_386 windows_amd64 386
