@@ -102,6 +102,10 @@ Each encoding pass:
 5. Optionally repeats the pipeline for additional encoding passes.
 6. Optionally prepends the register-save prefix for safe mode.
 
+The schema wrapper places its decoder code before terminal encoded data. This
+lets safe-mode payloads fall through their register-restore suffix to the end of
+the complete output instead of re-entering schema-decoder instructions.
+
 <p align="center">
   <img src=".github/flow.png" alt="SGN encoding flow">
 </p>
@@ -257,7 +261,7 @@ make
 
 ## Testing
 
-Run the complete native Rust, Go, and seeded differential suite:
+Run the portable native Rust, Go, and seeded differential suite:
 
 ```sh
 make test
@@ -269,12 +273,14 @@ The individual commands are:
 make test-rust
 make test-go
 make test-compat
+make test-wasm-execution  # Linux x64 only
 ```
 
 `make test-compat` builds `examples/compat_oracle.rs`, sets
 `SGN_NATIVE_ORACLE`, and runs `TestNativeRustWASMCompatibility`. CI also runs
-an upstream `d914ab2` golden vector so the native and Wasm implementations
-cannot drift together unnoticed. The full Go suite runs with the race detector:
+an upstream `d914ab2` plain-decoder golden vector plus a fixed-schema golden
+vector so the native and Wasm implementations cannot drift together unnoticed.
+The full Go suite runs with the race detector:
 
 ```sh
 make test-go GO_TEST_FLAGS=-race
@@ -284,9 +290,18 @@ Native Rust tests include cipher round trips and real execution tests. The x86
 execution harness skips automatically when a 32-bit C toolchain is unavailable
 for local development. CI installs that toolchain and sets
 `SGN_REQUIRE_EXECUTION=1`, so either x86 or x64 execution being unavailable is a
-test failure rather than a silent skip. The x86 harness executes 1,024
-replayable fixed-seed variants across four encoder modes and every initial ADFL
-key byte; production encoding continues to use operating-system randomness.
+test failure rather than a silent skip. Both architectures execute 1,792
+replayable variants: seven shared modes times every initial ADFL key byte, with
+an explicit 32-byte RNG seed for every case. The modes cover schema and plain
+decoders, register preservation on and off, zero/default/high obfuscation,
+multiple layers, and the exact one-layer safe/schema/obfuscation-100 Sliver
+profile. Failures include the complete replay tuple and child exit or signal.
+
+On Linux x64, `make test-wasm-execution` independently runs all 1,792 outputs
+returned by the public Go `EncodeWithSeed` method in isolated child processes.
+This composes the embedded-Wasm wrapper with real decoder execution instead of
+relying only on native/Wasm byte equality. Production encoding continues to use
+operating-system randomness.
 
 ## Notes on the Rust port
 

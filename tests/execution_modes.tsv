@@ -1,0 +1,7 @@
+default-schema	50	false	1	false
+plain	50	true	1	false
+three-layers-schema	50	false	3	false
+no-obfuscation-schema	0	false	1	false
+safe-plain	50	true	1	true
+sliver-safe-schema	100	false	1	true
+sliver-safe-schema-three-layers	100	false	3	true

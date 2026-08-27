@@ -65,5 +65,8 @@ jobs:
       - name: Test Go
         run: make test-go GO_TEST_FLAGS=-race
 
+      - name: Test Embedded Wasm x64 Execution Corpus
+        run: make test-wasm-execution
+
       - name: Test Native Rust and Embedded Wasm Compatibility
         run: make test-compat

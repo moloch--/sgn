@@ -70,28 +70,45 @@ func TestEncodeWithSeedDeterministicMatrix(t *testing.T) {
 	}
 }
 
-// This vector was produced by the unmodified upstream Rust port at d914ab2,
-// using its public Encoder.EncodeWith method and ChaCha20Rng. It prevents the
-// native oracle and Wasm build from drifting together while still agreeing
-// with each other.
-func TestUpstreamRustGoldenVector(t *testing.T) {
-	vectors := []struct {
-		architecture int
-		wantLength   int
-		wantDigest   string
-		wantSeed     byte
-	}{
-		{64, 728, "6803eae70a07a1cd38d0b23a4cabd9c9e26120fcddd5d56fb09eb50ff870ee4a", 53},
-		{32, 449, "a8506a658cd1b2c285f49b3dc7ba15ab0f520d9a4ca8df7972e654c13e0169ed", 3},
-	}
+type goldenVector struct {
+	architecture int
+	wantLength   int
+	wantDigest   string
+	wantSeed     byte
+}
 
+// These plain-decoder vectors were produced by the unmodified upstream Rust
+// port at d914ab2 using its public Encoder.EncodeWith method and ChaCha20Rng.
+// They preserve an independent upstream baseline for the pipeline that was not
+// affected by the schema fallthrough repair.
+func TestUpstreamRustGoldenVector(t *testing.T) {
+	vectors := []goldenVector{
+		{64, 278, "800f6f7de86913161a7fcc04e965a40170e18b94d7d9d63d67db844d9099da52", 131},
+		{32, 126, "4855bf6012cb3a09c9fcd4beb3ef30676684547adf3030e6af4c8a48d5aeca68", 255},
+	}
+	assertGoldenVectors(t, "upstream d914ab2 plain", true, vectors)
+}
+
+// These vectors lock the code-first/data-last schema layout introduced by the
+// v0.1.1 safe-register fallthrough repair. The executable corpus independently
+// proves that the same layout decodes and falls through correctly.
+func TestFixedSchemaGoldenVector(t *testing.T) {
+	vectors := []goldenVector{
+		{64, 740, "ae2c0d6fd9e1503c0a682d86962fd6639de9649c42a67382864daa3dd2a58049", 53},
+		{32, 457, "e1a524180d6d30bf6b39acb819f840d7f3369ec66e961bb68e292d2ed74eb756", 3},
+	}
+	assertGoldenVectors(t, "fixed schema layout", false, vectors)
+}
+
+func assertGoldenVectors(t *testing.T, label string, plainDecoder bool, vectors []goldenVector) {
+	t.Helper()
 	for _, vector := range vectors {
 		t.Run(fmt.Sprintf("x%d", vector.architecture), func(t *testing.T) {
 			testCase := seededCompatibilityCase{
-				name:             "upstream_d914ab2",
+				name:             strings.ReplaceAll(label, " ", "_"),
 				architecture:     vector.architecture,
 				obfuscationLimit: 32,
-				plainDecoder:     false,
+				plainDecoder:     plainDecoder,
 				adflSeed:         0xa7,
 				encodingCount:    3,
 				saveRegisters:    true,
@@ -108,14 +125,14 @@ func TestUpstreamRustGoldenVector(t *testing.T) {
 			digest := sha256.Sum256(output)
 			if len(output) != vector.wantLength || fmt.Sprintf("%x", digest) != vector.wantDigest {
 				t.Fatalf(
-					"upstream d914ab2 output drifted: got len=%d sha256=%x, want len=%d sha256=%s",
-					len(output), digest, vector.wantLength, vector.wantDigest,
+					"%s output drifted: got len=%d sha256=%x, want len=%d sha256=%s",
+					label, len(output), digest, vector.wantLength, vector.wantDigest,
 				)
 			}
 			if encoder.Seed != vector.wantSeed || encoder.EncodingCount != 1 {
 				t.Fatalf(
-					"upstream d914ab2 final state drifted: got seed=%d count=%d, want seed=%d count=1",
-					encoder.Seed, encoder.EncodingCount, vector.wantSeed,
+					"%s final state drifted: got seed=%d count=%d, want seed=%d count=1",
+					label, encoder.Seed, encoder.EncodingCount, vector.wantSeed,
 				)
 			}
 		})
