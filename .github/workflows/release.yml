@@ -2,7 +2,6 @@ name: Release
 
 on:
   push:
-    branches: [main]
     tags:
       - "v*"
 
@@ -15,7 +14,6 @@ concurrency:
 
 env:
   RELEASE_VERSION: ${{ github.ref_name }}
-  KEYSTONE_WASM_VERSION: v0.0.2
   BINARY_NAME: sgn
 
 jobs:
@@ -96,7 +94,7 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           output="dist/${BINARY_NAME}_${{ matrix.goos }}-${{ matrix.goarch }}"
-          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build \
+          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build \
             -trimpath \
             -ldflags "-s -w -X github.com/moloch--/sgn/config.Version=${RELEASE_VERSION}" \
             -o "${output}" \
@@ -291,14 +289,21 @@ jobs:
       - name: Publish Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           TAG_NAME: ${{ env.RELEASE_VERSION }}
         run: |
           set -euo pipefail
-          mapfile -t release_files < <(find release -type f -print)
-          if [ ${#release_files[@]} -eq 0 ]; then
-            echo "No release artifacts found in release/" >&2
+          mapfile -t release_files < <(find release -mindepth 1 -maxdepth 1 -type f -print | sort)
+          if [ ${#release_files[@]} -ne 27 ]; then
+            echo "Expected 27 release binaries, found ${#release_files[@]}" >&2
             exit 1
           fi
+
+          (
+            cd release
+            sha256sum "${release_files[@]#release/}" > checksums.txt
+          )
+          release_files+=(release/checksums.txt)
 
           if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
             gh release upload "${TAG_NAME}" "${release_files[@]}" --clobber
@@ -306,5 +311,6 @@ jobs:
             gh release create "${TAG_NAME}" \
               --title "${TAG_NAME}" \
               --generate-notes \
+              --verify-tag \
               "${release_files[@]}"
           fi

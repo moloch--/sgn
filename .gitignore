@@ -1,24 +1,16 @@
-# Created by .ignore support plugin (hsz.mobi)
-### Go template
-# Binaries for programs and plugins
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-*.txt
-
-# Test binary, built with `go test -c`
+# Go build and test output
+/build/
+/sgn
+/sgn.exe
 *.test
-
-# Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
+# Rust build output
+/target/
+**/*.rs.bk
+*.pdb
 
-.idea
-
-# Builds
-build/
-sgn
+# Cargo.lock pins the Rust dependency graph and pkg/sgn.wasm is the tracked
+# module embedded by the Go package. Do not ignore either artifact.
+!Cargo.lock
+!pkg/sgn.wasm

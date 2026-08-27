@@ -17,31 +17,53 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   build-test:
-    name: Build and Test
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-  
+    name: Rust, Wasm, and Go
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
     steps:
       - name: Check Out Code
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - name: Set up Go
+      - name: Install 32-bit Execution Toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes gcc-multilib
+
+      - name: Install Rust and WASI Target
+        uses: dtolnay/rust-toolchain@1.94.0
+        with:
+          targets: wasm32-wasip1
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Set Up Go
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache: true
 
-      - name: Build
-        env:
-          CGO_ENABLED: 0
+      - name: Verify Embedded Rust Wasm
+        run: make wasm-verify
+
+      - name: Build Go/Wasm CLI
         run: make
 
-      - name: Test
-        run: go test ./...
+      - name: Test Native Rust
+        env:
+          SGN_REQUIRE_EXECUTION: "1"
+        run: make test-rust
+
+      - name: Test Go
+        run: make test-go GO_TEST_FLAGS=-race
+
+      - name: Test Native Rust and Embedded Wasm Compatibility
+        run: make test-compat

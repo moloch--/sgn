@@ -1,160 +1,303 @@
+<div align="center">
+  <img src=".github/banner.png" alt="SGN">
+  <br>
+
+  [![GitHub All Releases][release-img]][release]
+  [![Build][workflow-img]][workflow]
+  [![Issues][issues-img]][issues]
+  [![Crates][crates-img]][crates]
+  [![License: MIT][license-img]][license]
+</div>
+
+[crates]: https://crates.io/crates/sgn
+[crates-img]: https://img.shields.io/crates/v/sgn
+[release]: https://github.com/moloch--/sgn/releases
+[release-img]: https://img.shields.io/github/v/release/moloch--/sgn
+[issues]: https://github.com/moloch--/sgn/issues
+[issues-img]: https://img.shields.io/github/issues/moloch--/sgn?color=red
+[license]: https://raw.githubusercontent.com/moloch--/sgn/master/LICENSE
+[license-img]: https://img.shields.io/github/license/moloch--/sgn.svg
+[workflow-img]: https://github.com/moloch--/sgn/actions/workflows/build.yml/badge.svg
+[workflow]: https://github.com/moloch--/sgn/actions/workflows/build.yml
+[fe-article]: https://www.fireeye.com/blog/threat-research/2019/10/shikata-ga-nai-encoder-still-going-strong.html
+[lfsr]: https://en.wikipedia.org/wiki/Linear-feedback_shift-register
+
+SGN is a polymorphic binary encoder for x86 and x64 shellcode. It uses an
+additive feedback loop to encode a payload and produces a self-decoding,
+polymorphic result inspired by the original
+[Shikata ga nai](https://github.com/rapid7/metasploit-framework/blob/master/modules/encoders/x86/shikata_ga_nai.rb).
+
+This fork preserves the Go module, CLI, and public `pkg` API while adopting the
+upstream Rust port as the encoding implementation. The Rust core uses
+[`iced-x86`](https://docs.rs/iced-x86) instead of the legacy Keystone text
+assembler.
+
+## Go/Wasm architecture
+
+The checked-in [`pkg/sgn.wasm`](pkg/sgn.wasm) is the Rust library compiled as a
+`wasm32-wasip1` `cdylib`. Go embeds that module with `go:embed` and executes it
+in-process with wazero:
+
+```text
+Go CLI or github.com/moloch--/sgn/pkg
+                    |
+                    v
+              wazero runtime
+                    |
+                    v
+       embedded pkg/sgn.wasm ABI
+                    |
+                    v
+          upstream Rust Encoder
+```
+
+Go users therefore do not need Rust installed at runtime and do not launch an
+external process. Rust remains available as a native library and CLI from the
+same checkout.
+
+The existing Go `Encoder`, its exported fields, and helpers are retained for
+source compatibility. `Encoder.Encode` now delegates to the Rust/Wasm pipeline.
+Legacy helpers such as the assembly, cipher, decoder, and obfuscation helpers
+remain implemented in Go for callers that use them directly; they are not part
+of the native-Rust/Wasm byte-parity guarantee.
+
+## Determinism, parity, and randomness
+
+`Encoder.EncodeWithSeed` accepts a 32-byte `RandomSeed` and is deterministic
+when the payload and all `Encoder` fields are also identical. In particular,
+the legacy one-byte `Encoder.Seed` is the ADFL key and must be fixed separately.
+The compatibility suite supplies the same inputs to native Rust and embedded
+Rust/Wasm, then compares their output bytes and final mutable encoder state.
+
+The parity boundary is native Rust versus the embedded build of that same Rust
+source and locked dependency graph. It intentionally does not promise the same
+bytes as the historical Go encoder: the move from Keystone to `iced-x86`, plus
+changes to instruction layout and random-number consumption, changed the
+polymorphic byte stream.
+
+Production calls should use `Encode`. The Go API obtains both its ADFL key and
+its 32-byte Rust RNG seed from `crypto/rand`; native Rust `Encoder::encode` uses
+the cryptographically secure thread RNG. Fixed seeds are exposed for tests,
+reproducible fixtures, and debugging, not as the production default.
+
+## Features
+
+- 32-bit and 64-bit payload support.
+- Small, loop-free ADFL decoder stub.
+- Optional schema encoding so the decoder also appears polymorphic.
+- Random value-preserving garbage instructions.
+- Optional safe mode that preserves register values.
+- Multiple recursive encoding passes.
+- ASCII and bad-character filtering in the Go CLI.
+
+## How it works
+
+Each encoding pass:
+
+1. Optionally appends a register-restore suffix for safe mode.
+2. Prepends random, value-preserving garbage instructions.
+3. Ciphers the payload with the ADFL cipher and prepends its decoder stub.
+4. Unless `--plain` is set, schema-encrypts the stub and prepends a schema
+   decoder.
+5. Optionally repeats the pipeline for additional encoding passes.
+6. Optionally prepends the register-save prefix for safe mode.
+
 <p align="center">
-  <img src="https://github.com/EgeBalci/sgn/raw/master/img/banner.png">
-  </br>
-  <a href="https://github.com/EgeBalci/sgn">
-    <img src="https://img.shields.io/badge/version-2.0.1-green.svg?style=flat-square">
-  </a>
-  <a href="https://goreportcard.com/report/github.com/egebalci/sgn">
-    <img src="https://goreportcard.com/badge/github.com/egebalci/sgn?style=flat-square">
-  </a>
-  <a href="https://github.com/EgeBalci/sgn/issues">
-    <img src="https://img.shields.io/github/issues/egebalci/sgn?style=flat-square&color=red">
-  </a>
-  <a href="https://raw.githubusercontent.com/EgeBalci/sgn/master/LICENSE">
-    <img src="https://img.shields.io/github/license/egebalci/sgn.svg?style=flat-square">
-  </a>
-  <a href="https://twitter.com/egeblc">
-    <img src="https://img.shields.io/badge/twitter-@egeblc-55acee.svg?style=flat-square">
-  </a>
+  <img src=".github/flow.png" alt="SGN encoding flow">
 </p>
 
-SGN is a polymorphic binary encoder for offensive security purposes such as generating statically undetecable binary payloads. It uses a additive feedback loop to encode given binary instructions similar to [LSFR](https://en.wikipedia.org/wiki/Linear-feedback_shift_register). This project is the reimplementation of the [original Shikata ga nai](https://github.com/rapid7/metasploit-framework/blob/master/modules/encoders/x86/shikata_ga_nai.rb) in golang with many improvements. 
+## Install and build
 
+Install the self-contained Go/Wasm CLI:
 
-## How? & Why?
-For offensive security community, the original implementation of shikata ga nai encoder is considered to be the best shellcode encoder(until now). But over the years security researchers found several pitfalls for statically detecing the encoder(related work [FireEye article](https://www.fireeye.com/blog/threat-research/2019/10/shikata-ga-nai-encoder-still-going-strong.html)). The main motive for this project was to create a better encoder that encodes the given binary to the point it is identical with totally random data and not possible to detect the presence of a decoder. With the help of [keystone](http://www.keystone-engine.org/) assembler library following improvments are implemented.
-
-- [x] 64 bit support. `Finally properly encoded x64 shellcodes !`
-- [x] New smaller decoder stub. `LFSR key reduced to 1 byte`
-- [x] Encoded stub with pseudo random schema. `Decoder stub is also encoded with a psudo random schema`
-- [x] No visible loop condition `Stub decodes itself WITHOUT using any loop conditions !!` 
-- [x] Decoder stub obfuscation. `Random garbage instruction generator added with keystone`
-- [x] Safe register option. `Non of the registers are clobbered (optional preable, may reduce polimorphism)` 
-
-## Install
-
-You can get the pre-compiled binaries [HERE](https://github.com/EgeBalci/sgn/releases). For building from source follow the steps bellow.
-
-**Dependencies:**
-
-The only dependency for building the source is the [keystone engine](https://github.com/keystone-engine/keystone), follow [these](https://github.com/keystone-engine/keystone/blob/master/docs/COMPILE.md) instructions for installing the library. Once libkeystone is installed on the system, simply just go install it ツ
-
-```
-go install github.com/EgeBalci/sgn@latest
+```sh
+go install github.com/moloch--/sgn@latest
 ```
 
-***DOCKER INSTALL***
+Build it from a checkout using the pinned Rust toolchain:
 
-[![Docker](http://dockeri.co/image/egee/sgn)](https://hub.docker.com/r/egee/sgn/)
-
-```
-docker pull egee/sgn
-docker run -it egee/sgn
-```
-
-**Usage**
-
-`-h` is pretty self explanatory use `-v` if you want to see what's going on behind the scenes `( ͡° ͜ʖ ͡°)_/¯`
-<p align="center">
-  <img src="https://github.com/EgeBalci/sgn/raw/master/img/usage.gif">
-</p>
-
-
-```
-       __   _ __        __                               _ 
-  ___ / /  (_) /_____ _/ /____ _  ___ ____ _  ___  ___ _(_)
- (_-</ _ \/ /  '_/ _ `/ __/ _ `/ / _ `/ _ `/ / _ \/ _ `/ / 
-/___/_//_/_/_/\_\\_,_/\__/\_,_/  \_, /\_,_/ /_//_/\_,_/_/  
-========[Author:-Ege-Balcı-]====/___/=======v2.0.1=========  
-    ┻━┻ ︵ヽ(`Д´)ﾉ︵ ┻━┻           (ノ ゜Д゜)ノ ︵ 仕方がない
-
-Usage: sgn
-
-Flags:
-  -h, --help               Show context-sensitive help.
-  -i, --input=STRING       Input binary path
-  -o, --out=STRING         Encoded output binary name
-  -a, --arch=64            Binary architecture (32/64)
-  -c, --enc=1              Number of times to encode the binary (increases overall size)
-  -M, --max=50             Maximum number of bytes for decoder obfuscation
-      --plain              Do not encode the decoder stub
-      --ascii              Generates a full ASCI printable payload (may take very long time to bruteforce)
-  -S, --safe               Preserve all register values (a.k.a. no clobber)
-      --badchars=STRING    Don't use specified bad characters given in hex format (\x00\x01\x02...)
-  -v, --verbose            Verbose mode
-      --version
-
+```sh
+rustup toolchain install 1.94.0
+rustup target add wasm32-wasip1 --toolchain 1.94.0
+make
+./build/sgn --help
 ```
 
-***Docker Usage***
+Install the native Rust CLI from the checkout instead:
 
-```
-docker run -it -v /tmp/:/tmp/ sgn -i /tmp/shellcode
+```sh
+cargo +1.94.0 install --locked --path .
 ```
 
-## Using As Library
-Warning !! SGN package is still under development for better performance and several improvements. Most of the functions are subject to change.
+## Go API
 
-```
+`Encode` uses fresh cryptographic randomness on every call:
+
+```go
 package main
 
 import (
-	"encoding/hex"
-	"fmt"
-	"io/ioutil"
+    "log"
+    "os"
 
-	sgn "github.com/egebalci/sgn/pkg"
+    sgn "github.com/moloch--/sgn/pkg"
 )
 
 func main() {
-	// First open some file
-	file, err := os.ReadFile("myfile.bin")
-	if err != nil { // check error
-		fmt.Println(err)
-		return
-	}
-	// Create a new SGN encoder
-	encoder, err := sgn.NewEncoder(64)
-	if err != nil {
-		fmt.Println(err)
-		return
-    }	
-    // Set the proper architecture
-	encoder.SetArchitecture(64)
-	// Encode the binary
-	encodedBinary, err := encoder.Encode(file)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	// Print out the hex dump of the encoded binary
-	fmt.Println(hex.Dump(encodedBinary))
+    payload, err := os.ReadFile("payload.bin")
+    if err != nil {
+        log.Fatal(err)
+    }
 
+    encoder, err := sgn.NewEncoder(64)
+    if err != nil {
+        log.Fatal(err)
+    }
+    encoded, err := encoder.Encode(payload)
+    if err != nil {
+        log.Fatal(err)
+    }
+    if err := os.WriteFile("payload.bin.sgn", encoded, 0o600); err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 
+Use `EncodeWithSeed` when a reproducible fixture is required:
 
-## Execution Flow
+```go
+func encodeFixture(payload []byte) ([]byte, error) {
+    encoder, err := sgn.NewEncoder(64)
+    if err != nil {
+        return nil, err
+    }
+    encoder.Seed = 0xa7 // the independent, legacy one-byte ADFL key
 
-The following image is a basic workflow diagram for the encoder. But keep in mind that the sizes, locations and orders will change for garbage instructions, decoders and schema decoders on each iteration. 
+    var randomSeed sgn.RandomSeed
+    for i := range randomSeed {
+        randomSeed[i] = 0x42
+    }
+    return encoder.EncodeWithSeed(payload, randomSeed)
+}
+```
 
-<p align="center">
-  <img src="https://github.com/EgeBalci/sgn/raw/master/img/flow.png">
-</p>
+## Native Rust API
 
-LFSR itself is pretty powerful in terms of probability space. For even more polimorphism garbage instructions are appended at the begining of the unencoded raw payload. Below image shows the the companion matrix of the characteristic polynomial of the LFSR and denoting the seed as a column vector, the state of the register in Fibonacci configuration after k steps.
+```rust
+use sgn::{Encoder, RANDOM_SEED_SIZE};
 
-<p align="center">
-  <img src="https://github.com/EgeBalci/sgn/raw/master/img/matrices.svg">
-</p>
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let payload = std::fs::read("payload.bin")?;
 
+    // Production: cryptographically secure randomness.
+    let mut production = Encoder::new(64)?;
+    let _encoded = production.encode(&payload)?;
 
-## [Challenge](https://github.com/EgeBalci/sgn/wiki/Challange_Guidelines)
+    // Tests/fixtures: fix both the ADFL key and the 32-byte RNG seed.
+    let mut replay = Encoder::new(64)?;
+    replay.seed = 0xa7;
+    let _replayed = replay.encode_with_seed(&payload, [0x42; RANDOM_SEED_SIZE])?;
+    Ok(())
+}
+```
 
-Considering the probability space of this encoder I personally don't think that any rule based static detection mechanism can detect the binaries that are encoded with SGN. In fact I am willing to give out the donation money for this project as a symbolic prize if anyone can write a YARA rule that can detect every encoded output. Check out [***HERE***](https://github.com/EgeBalci/sgn/wiki/Challange_Guidelines) for the guidelines and rules for claiming the donation money.
+See [`examples/encode_binary.rs`](examples/encode_binary.rs) for a complete
+native example.
 
-[***Current Donation Amount***](https://www.blockchain.com/tr/btc/address/1615NKMjpHShh3hWHrazWybgJxpqZgz4f2)
+## CLI
 
-[![QR](https://github.com/EgeBalci/sgn/raw/master/img/btc_qr.png)](https://www.blockchain.com/tr/btc/address/1615NKMjpHShh3hWHrazWybgJxpqZgz4f2)
+The Go/Wasm CLI retains the fork's existing flags:
 
-If you tried and failed please consider donating `[̲̅$̲̅(̲̅ ͡° ͜ʖ ͡°̲̅)̲̅$̲̅]`
+```text
+Usage: sgn
+
+Flags:
+  -i, --input=STRING       Input binary path
+  -o, --out=STRING         Encoded output binary name
+  -a, --arch=64            Binary architecture (32/64)
+  -c, --enc=1              Number of encoding passes
+  -M, --max=50             Maximum decoder-obfuscation bytes
+      --plain              Do not encode the decoder stub
+      --ascii              Require fully ASCII-printable output
+  -S, --safe               Preserve register values
+      --badchars=STRING    Avoid bytes such as \\x00\\x0a
+  -v, --verbose            Verbose output
+      --version            Print version
+```
+
+Example:
+
+```sh
+sgn -i shellcode.bin -o encoded.bin -a 64 --badchars '\x00\x0a\x0d'
+```
+
+## Updating the embedded Wasm
+
+Rust source changes must be accompanied by a refreshed embedded module. All
+Cargo commands use `--locked`, and the Makefile uses Rust 1.94.0 so the tracked
+artifact can be reproduced in CI. The Wasm-only Cargo profile preserves symbols
+through linking because link-time stripping can reorder internal functions on
+different compiler hosts. A repo-local Go tool then removes non-semantic custom
+sections deterministically. Together with stable source-path remapping, this
+makes the final byte comparison portable across builders.
+
+```sh
+# Build and normalize the module, then copy it into pkg/sgn.wasm.
+make wasm-update
+
+# Independently rebuild and fail if the tracked copy differs.
+make wasm-verify
+
+# Verify the embedded module, then build the Go CLI.
+make
+```
+
+`Cargo.lock` and `pkg/sgn.wasm` are intentionally committed. `target/` and
+`build/` remain generated output.
+
+## Testing
+
+Run the complete native Rust, Go, and seeded differential suite:
+
+```sh
+make test
+```
+
+The individual commands are:
+
+```sh
+make test-rust
+make test-go
+make test-compat
+```
+
+`make test-compat` builds `examples/compat_oracle.rs`, sets
+`SGN_NATIVE_ORACLE`, and runs `TestNativeRustWASMCompatibility`. CI also runs
+an upstream `d914ab2` golden vector so the native and Wasm implementations
+cannot drift together unnoticed. The full Go suite runs with the race detector:
+
+```sh
+make test-go GO_TEST_FLAGS=-race
+```
+
+Native Rust tests include cipher round trips and real execution tests. The x86
+execution harness skips automatically when a 32-bit C toolchain is unavailable
+for local development. CI installs that toolchain and sets
+`SGN_REQUIRE_EXECUTION=1`, so either x86 or x64 execution being unavailable is a
+test failure rather than a silent skip. The x86 harness executes 1,024
+replayable fixed-seed variants across four encoder modes and every initial ADFL
+key byte; production encoding continues to use operating-system randomness.
+
+## Notes on the Rust port
+
+- Decoder stubs use `iced-x86`'s typed assembler API rather than Keystone
+  assembly text.
+- x64 uses RIP-relative addressing and x86 uses a `call`/`pop` two-pass scheme.
+- The schema cipher operates directly on the CPU's native little-endian DWORD
+  view.
+- `random_byte` spans the full `0..=255` range and the garbage-size limit is
+  consistently applied per block.
+
+The original SGN design and Rust port are by Ege Balci. This fork's Go/Wasm
+layer exists to keep the established Go integration while sharing the current
+Rust encoder implementation.
