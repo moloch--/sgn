@@ -1,6 +1,7 @@
 package sgn
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -44,6 +45,33 @@ func TestStackAndBasePointer(t *testing.T) {
 	}
 	if bp := enc64.GetBasePointer(); bp != "RBP" {
 		t.Fatalf("expected RBP for 64-bit base pointer, got %s", bp)
+	}
+}
+
+func TestX64SafeRegisterWrapperPreservesEntryAlignmentAndASCIICompatibility(t *testing.T) {
+	if got := X64_REG_SAVE_PREFIX[len(X64_REG_SAVE_PREFIX)-1]; got != 0x50 {
+		t.Fatalf("x64 safe prefix ends with %#x, want duplicate PUSH RAX (0x50)", got)
+	}
+	if got := X64_REG_SAVE_SUFFIX[0]; got != 0x58 {
+		t.Fatalf("x64 safe suffix starts with %#x, want POP RAX (0x58)", got)
+	}
+	if !bytes.Contains(X64_REG_SAVE_PREFIX[:len(X64_REG_SAVE_PREFIX)-1], []byte{0x50}) {
+		t.Fatal("x64 alignment PUSH RAX introduces a new fixed prefix byte")
+	}
+	if !bytes.Contains(X64_REG_SAVE_SUFFIX[1:], []byte{0x58}) {
+		t.Fatal("x64 alignment POP RAX introduces a new fixed suffix byte")
+	}
+	if len(X64_REG_SAVE_PREFIX) != len(X64_REG_SAVE_SUFFIX) {
+		t.Fatalf(
+			"x64 safe wrapper byte lengths differ: prefix=%d suffix=%d",
+			len(X64_REG_SAVE_PREFIX),
+			len(X64_REG_SAVE_SUFFIX),
+		)
+	}
+	for index, value := range append(append([]byte(nil), X64_REG_SAVE_PREFIX...), X64_REG_SAVE_SUFFIX...) {
+		if value < 0x20 || value > 0x7e {
+			t.Fatalf("x64 safe wrapper byte %d is fixed non-ASCII value %#x", index, value)
+		}
 	}
 }
 

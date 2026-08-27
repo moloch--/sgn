@@ -71,33 +71,35 @@ func TestEncodeWithSeedDeterministicMatrix(t *testing.T) {
 }
 
 type goldenVector struct {
-	architecture int
-	wantLength   int
-	wantDigest   string
-	wantSeed     byte
+	architecture  int
+	saveRegisters bool
+	wantLength    int
+	wantDigest    string
+	wantSeed      byte
 }
 
 // These plain-decoder vectors were produced by the unmodified upstream Rust
 // port at d914ab2 using its public Encoder.EncodeWith method and ChaCha20Rng.
-// They preserve an independent upstream baseline for the pipeline that was not
-// affected by the schema fallthrough repair.
+// The x64 vector disables SaveRegisters so its pipeline remains unchanged by
+// the alignment repair; the unaffected x86 vector retains the upstream safe
+// wrapper baseline.
 func TestUpstreamRustGoldenVector(t *testing.T) {
 	vectors := []goldenVector{
-		{64, 278, "800f6f7de86913161a7fcc04e965a40170e18b94d7d9d63d67db844d9099da52", 131},
-		{32, 126, "4855bf6012cb3a09c9fcd4beb3ef30676684547adf3030e6af4c8a48d5aeca68", 255},
+		{64, false, 140, "3f070dec44ae9196afbb57a858988939d1c13a00cc181bc9e6de158fae6c49a9", 131},
+		{32, true, 126, "4855bf6012cb3a09c9fcd4beb3ef30676684547adf3030e6af4c8a48d5aeca68", 255},
 	}
 	assertGoldenVectors(t, "upstream d914ab2 plain", true, vectors)
 }
 
 // These vectors lock the code-first/data-last schema layout introduced by the
-// v0.1.1 safe-register fallthrough repair. The executable corpus independently
-// proves that the same layout decodes and falls through correctly.
+// v0.1.1 fallthrough repair plus this patch's aligned x64 safe wrapper. The
+// executable corpus independently proves that both decode and fall through.
 func TestFixedSchemaGoldenVector(t *testing.T) {
 	vectors := []goldenVector{
-		{64, 740, "ae2c0d6fd9e1503c0a682d86962fd6639de9649c42a67382864daa3dd2a58049", 53},
-		{32, 457, "e1a524180d6d30bf6b39acb819f840d7f3369ec66e961bb68e292d2ed74eb756", 3},
+		{64, true, 746, "125c83d3022b7c0d2cb3ee893d4031a3405136bd7b165d022f587e66b7a7da69", 53},
+		{32, true, 457, "e1a524180d6d30bf6b39acb819f840d7f3369ec66e961bb68e292d2ed74eb756", 3},
 	}
-	assertGoldenVectors(t, "fixed schema layout", false, vectors)
+	assertGoldenVectors(t, "fixed schema layout and aligned safe wrapper", false, vectors)
 }
 
 func assertGoldenVectors(t *testing.T, label string, plainDecoder bool, vectors []goldenVector) {
@@ -111,7 +113,7 @@ func assertGoldenVectors(t *testing.T, label string, plainDecoder bool, vectors 
 				plainDecoder:     plainDecoder,
 				adflSeed:         0xa7,
 				encodingCount:    3,
-				saveRegisters:    true,
+				saveRegisters:    vector.saveRegisters,
 				randomSeed:       repeatedRandomSeed(0x42),
 				payload:          []byte("fixed-seed compatibility payload"),
 			}

@@ -63,7 +63,7 @@ test-wasm-execution: wasm-verify
 		echo "test-wasm-execution requires linux/amd64" >&2; \
 		exit 1; \
 	}
-	SGN_REQUIRE_EXECUTION=1 $(GO) test ./pkg -run '^TestWASMEncodeWithSeedX64ExecutionCorpus$$' -count=1
+	SGN_REQUIRE_EXECUTION=1 $(GO) test ./pkg -run '^TestWASMEncodeWithSeedX64(ExecutionCorpus|SliverProfileEntryAlignment|SliverProfileAlignedStackAccess|SliverProfileGPRRestoration|SliverProfileLargePayload)$$' -count=1
 
 # Compare native Rust and embedded Rust/Wasm byte-for-byte under fixed seeds.
 test-compat: wasm-verify

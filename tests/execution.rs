@@ -19,8 +19,49 @@ use std::process::{Command, ExitStatus};
 const MAGIC: u64 = 0x1337_c0de;
 /// mov eax, 0x1337c0de ; ret
 const PAYLOAD: &[u8] = &[0xb8, 0xde, 0xc0, 0x37, 0x13, 0xc3];
-/// Safe mode must fall through its generated restore suffix before returning.
-const SAFE_PAYLOAD: &[u8] = &[0x90, 0x90, 0x90];
+/// Assert the normal SysV AMD64 function-entry alignment, then fall through.
+/// A misaligned safe wrapper executes UD2 in the isolated child process.
+const SYSV_ENTRY_ALIGNMENT_PAYLOAD: &[u8] = &[
+    0x48, 0x89, 0xe0, // mov rax, rsp
+    0x83, 0xe0, 0x0f, // and eax, 0xf
+    0x83, 0xf8, 0x08, // cmp eax, 8
+    0x74, 0x02, // je aligned
+    0x0f, 0x0b, // ud2
+];
+/// Exercise an aligned SIMD stack access after a normal SysV payload prologue.
+/// A wrapper that flips entry alignment faults on MOVAPS, matching the Sliver
+/// Linux/amd64 failure mode.
+const SYSV_ALIGNED_STACK_ACCESS_PAYLOAD: &[u8] = &[
+    0x48, 0x83, 0xec, 0x08, // sub rsp, 8
+    0x0f, 0x28, 0x04, 0x24, // movaps xmm0, [rsp]
+    0x48, 0x83, 0xc4, 0x08, // add rsp, 8
+];
+const ENTRY_RAX: u32 = 0x1111_1111;
+const ENTRY_RBX: u32 = 0x2222_2222;
+const ENTRY_R10: u32 = 0x3333_3333;
+const ENTRY_R15: u32 = 0x4444_4444;
+/// Clobber representative caller- and callee-saved GPRs, then fall through.
+const GPR_CLOBBER_PAYLOAD: &[u8] = &[
+    0x31, 0xc0, // xor eax, eax
+    0x31, 0xdb, // xor ebx, ebx
+    0x45, 0x31, 0xd2, // xor r10d, r10d
+    0x45, 0x31, 0xff, // xor r15d, r15d
+];
+/// Verify that the safe suffix restored the trampoline's known entry values.
+const GPR_RESTORE_CONTINUATION: &[u8] = &[
+    0x3d, 0x11, 0x11, 0x11, 0x11, // cmp eax, ENTRY_RAX
+    0x75, 0x20, // jne failed
+    0x81, 0xfb, 0x22, 0x22, 0x22, 0x22, // cmp ebx, ENTRY_RBX
+    0x75, 0x18, // jne failed
+    0x41, 0x81, 0xfa, 0x33, 0x33, 0x33, 0x33, // cmp r10d, ENTRY_R10
+    0x75, 0x0f, // jne failed
+    0x41, 0x81, 0xff, 0x44, 0x44, 0x44, 0x44, // cmp r15d, ENTRY_R15
+    0x75, 0x06, // jne failed
+    0xb8, 0xde, 0xc0, 0x37, 0x13, // mov eax, MAGIC
+    0xc3, // ret
+    0x0f, 0x0b, // failed: ud2
+];
+const SLIVER_LARGE_PAYLOAD_SIZE: usize = 16 * 1024 * 1024;
 const EXECUTION_MODES: &str = include_str!("execution_modes.tsv");
 const CHILD_PATH_ENV: &str = "SGN_X64_EXECUTION_CHILD_PATH";
 const CHILD_SKIP_CODE: i32 = 77;
@@ -58,6 +99,10 @@ fn trampoline(shell: &[u8]) -> Vec<u8> {
     // The function entry is RSP%16 == 8. Six pushes keep it there, so reserve
     // one slot to satisfy the SysV caller-side alignment rule before CALL.
     a.sub(rsp, 8).unwrap();
+    a.mov(eax, ENTRY_RAX).unwrap();
+    a.mov(ebx, ENTRY_RBX).unwrap();
+    a.mov(r10d, ENTRY_R10).unwrap();
+    a.mov(r15d, ENTRY_R15).unwrap();
     let mut target = a.create_label();
     a.call(target).unwrap();
     a.add(rsp, 8).unwrap();
@@ -172,6 +217,15 @@ fn parse_bool(value: &str, line_number: usize, field: &str) -> bool {
 
 fn encode_case(mode: ExecutionMode, adfl_seed: u8, random_seed: [u8; 32]) -> Vec<u8> {
     let payload = payload_for_mode(mode);
+    encode_payload_case(mode, adfl_seed, random_seed, payload)
+}
+
+fn encode_payload_case(
+    mode: ExecutionMode,
+    adfl_seed: u8,
+    random_seed: [u8; 32],
+    payload: &[u8],
+) -> Vec<u8> {
     let mut encoder = Encoder {
         architecture: 64,
         obfuscation_limit: mode.obfuscation_limit,
@@ -190,9 +244,16 @@ fn encode_case(mode: ExecutionMode, adfl_seed: u8, random_seed: [u8; 32]) -> Vec
         })
 }
 
+fn sliver_safe_schema_mode() -> ExecutionMode {
+    execution_modes()
+        .into_iter()
+        .find(|mode| mode.name == "sliver-safe-schema")
+        .expect("shared execution corpus must include the exact Sliver safe schema profile")
+}
+
 fn payload_for_mode(mode: ExecutionMode) -> &'static [u8] {
     if mode.save_registers {
-        SAFE_PAYLOAD
+        SYSV_ENTRY_ALIGNMENT_PAYLOAD
     } else {
         PAYLOAD
     }
@@ -204,15 +265,23 @@ fn replay_tuple(
     random_seed: &[u8; RANDOM_SEED_SIZE],
     payload: &[u8],
 ) -> String {
+    let payload_hex = if payload.len() <= 256 {
+        format!(" payload={}", encode_hex(payload))
+    } else {
+        String::new()
+    };
     format!(
-        "arch=64 mode={} obf={} plain={} adfl={adfl_seed:#04x} count={} safe={} rng={} payload={}",
+        "arch=64 mode={} obf={} plain={} adfl={adfl_seed:#04x} count={} safe={} rng={} \
+         payload_len={} payload_fnv1a64={:016x}{}",
         mode.name,
         mode.obfuscation_limit,
         mode.plain_decoder,
         mode.encoding_count,
         mode.save_registers,
         encode_hex(random_seed),
-        encode_hex(payload),
+        payload.len(),
+        fnv1a64(payload),
+        payload_hex,
     )
 }
 
@@ -253,6 +322,102 @@ fn execute_in_child(
         .output()
 }
 
+fn assert_sliver_profile_executes(case_name: &str, payload: &[u8], continuation: &[u8]) {
+    let mode = sliver_safe_schema_mode();
+    let adfl_seed = 0;
+    let random_seed = [0; RANDOM_SEED_SIZE];
+    let test_binary = std::env::current_exe().expect("locate current x64 execution test binary");
+    let test_directory = TestDirectory(
+        std::env::temp_dir().join(format!("sgn64_{case_name}_test_{}", std::process::id())),
+    );
+    std::fs::create_dir_all(&test_directory.0).expect("create Sliver profile test directory");
+    let shell_path = test_directory.0.join("shellcode.bin");
+
+    let encoded = encode_payload_case(mode, adfl_seed, random_seed, payload);
+    let output_length = encoded.len();
+    let output_digest = fnv1a64(&encoded);
+    let payload_digest = fnv1a64(payload);
+    let continuation_digest = fnv1a64(continuation);
+    let mut shell = encoded;
+    shell.extend_from_slice(continuation);
+    std::fs::write(&shell_path, &shell).unwrap_or_else(|error| {
+        panic!(
+            "write Sliver profile x64 execution case: case={case_name} mode={} arch=64 \
+             obf={} plain={} adfl={adfl_seed:#04x} count={} safe={} rng={} \
+             payload_len={} payload_fnv1a64={payload_digest:016x} output_len={output_length} \
+             output_fnv1a64={output_digest:016x} continuation_len={} \
+             continuation_fnv1a64={continuation_digest:016x}; error={error}",
+            mode.name,
+            mode.obfuscation_limit,
+            mode.plain_decoder,
+            mode.encoding_count,
+            mode.save_registers,
+            encode_hex(&random_seed),
+            payload.len(),
+            continuation.len(),
+        )
+    });
+
+    let child = execute_in_child(&test_binary, &shell_path).unwrap_or_else(|error| {
+        panic!(
+            "start Sliver profile x64 execution child: case={case_name} mode={} arch=64 \
+             obf={} plain={} adfl={adfl_seed:#04x} count={} safe={} rng={} \
+             payload_len={} payload_fnv1a64={payload_digest:016x} output_len={output_length} \
+             output_fnv1a64={output_digest:016x} continuation_len={} \
+             continuation_fnv1a64={continuation_digest:016x}; error={error}",
+            mode.name,
+            mode.obfuscation_limit,
+            mode.plain_decoder,
+            mode.encoding_count,
+            mode.save_registers,
+            encode_hex(&random_seed),
+            payload.len(),
+            continuation.len(),
+        )
+    });
+    if child.status.code() == Some(CHILD_SKIP_CODE) {
+        let detail = format!(
+            "case={case_name} mode={} arch=64 obf={} plain={} adfl={adfl_seed:#04x} \
+             count={} safe={} rng={} payload_len={} payload_fnv1a64={payload_digest:016x} \
+             output_len={output_length} output_fnv1a64={output_digest:016x} continuation_len={} \
+             continuation_fnv1a64={continuation_digest:016x}; {}",
+            mode.name,
+            mode.obfuscation_limit,
+            mode.plain_decoder,
+            mode.encoding_count,
+            mode.save_registers,
+            encode_hex(&random_seed),
+            payload.len(),
+            continuation.len(),
+            describe_status(child.status),
+        );
+        if execution_required() {
+            panic!("executable memory is unavailable while SGN_REQUIRE_EXECUTION is set: {detail}");
+        }
+        eprintln!("skipped: executable memory unavailable: {detail}");
+        return;
+    }
+    assert!(
+        child.status.success(),
+        "Sliver profile x64 shellcode did not decode and execute: case={case_name} mode={} \
+         arch=64 obf={} plain={} adfl={adfl_seed:#04x} count={} safe={} rng={} \
+         payload_len={} payload_fnv1a64={payload_digest:016x} output_len={output_length} \
+         output_fnv1a64={output_digest:016x} continuation_len={} \
+         continuation_fnv1a64={continuation_digest:016x}; {}; child_stdout={:?}; child_stderr={:?}",
+        mode.name,
+        mode.obfuscation_limit,
+        mode.plain_decoder,
+        mode.encoding_count,
+        mode.save_registers,
+        encode_hex(&random_seed),
+        payload.len(),
+        continuation.len(),
+        describe_status(child.status),
+        String::from_utf8_lossy(&child.stdout),
+        String::from_utf8_lossy(&child.stderr),
+    );
+}
+
 #[test]
 fn x64_execution_child() {
     let Some(path) = std::env::var_os(CHILD_PATH_ENV) else {
@@ -269,6 +434,45 @@ fn x64_execution_child() {
         MAGIC,
         "decoded payload returned wrong value"
     );
+}
+
+#[test]
+fn sliver_safe_x64_sysv_entry_alignment_executes() {
+    assert_sliver_profile_executes(
+        "sysv-entry-alignment",
+        SYSV_ENTRY_ALIGNMENT_PAYLOAD,
+        PAYLOAD,
+    );
+}
+
+#[test]
+fn sliver_safe_x64_aligned_stack_access_executes() {
+    assert_sliver_profile_executes(
+        "aligned-stack-access",
+        SYSV_ALIGNED_STACK_ACCESS_PAYLOAD,
+        PAYLOAD,
+    );
+}
+
+#[test]
+fn sliver_safe_x64_gpr_restoration_executes() {
+    assert_sliver_profile_executes(
+        "gpr-restoration",
+        GPR_CLOBBER_PAYLOAD,
+        GPR_RESTORE_CONTINUATION,
+    );
+}
+
+#[test]
+fn sliver_safe_x64_large_payload_executes() {
+    let mut payload = vec![0x90; SLIVER_LARGE_PAYLOAD_SIZE];
+    // The ADFL decoder must traverse the entire payload. Skip the NOP body at
+    // execution time so this remains a decoder-size regression rather than a
+    // runner-speed benchmark; the final NOP falls through the restore suffix.
+    let final_nop_displacement = (SLIVER_LARGE_PAYLOAD_SIZE as i32) - 6;
+    payload[0] = 0xe9;
+    payload[1..5].copy_from_slice(&final_nop_displacement.to_le_bytes());
+    assert_sliver_profile_executes("large-payload", &payload, PAYLOAD);
 }
 
 #[test]
@@ -290,8 +494,8 @@ fn deterministic_x64_execution_corpus() {
             let output_digest = fnv1a64(&encoded);
             let mut shell = encoded;
             if mode.save_registers {
-                // The encoded NOPs fall through the generated restore suffix
-                // into this unencoded sentinel continuation.
+                // The alignment probe falls through the generated restore
+                // suffix into this unencoded sentinel continuation.
                 shell.extend_from_slice(PAYLOAD);
             }
             std::fs::write(&shell_path, &shell).unwrap_or_else(|error| {

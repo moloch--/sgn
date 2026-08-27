@@ -20,7 +20,7 @@ type Options struct {
 	ObsLevel     int    `help:"Maximum number of bytes for decoder obfuscation" name:"max" short:"M" default:"50"`
 	PlainDecoder bool   `help:"Do not encode the decoder stub" name:"plain"`
 	AsciiPayload bool   `help:"Generates a full ASCI printable payload (may take very long time to bruteforce)" name:"ascii"`
-	Safe         bool   `help:"Preserve all register values (a.k.a. no clobber)" name:"safe" short:"S"`
+	Safe         bool   `help:"Preserve general-purpose registers after a fallthrough payload" name:"safe" short:"S"`
 	BadChars     string `help:"Don't use specified bad characters given in hex format (\\x00\\x01\\x02...)" name:"badchars"`
 	Verbose      bool   `help:"Verbose mode" name:"verbose" short:"v"`
 	Version      kong.VersionFlag

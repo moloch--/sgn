@@ -49,7 +49,7 @@ struct Cli {
     #[arg(long = "ascii")]
     ascii: bool,
 
-    /// Preserve all register values (a.k.a. no clobber)
+    /// Preserve general-purpose registers after a fallthrough payload
     #[arg(short = 'S', long = "safe")]
     safe: bool,
 
