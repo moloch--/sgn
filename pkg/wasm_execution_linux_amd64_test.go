@@ -22,14 +22,76 @@ import (
 )
 
 const (
-	x64ExecutionModeCount = 7
-	x64ExecutionTimeout   = 5 * time.Second
+	x64ExecutionModeCount     = 7
+	x64ExecutionTimeout       = 5 * time.Second
+	x64SliverLargePayloadSize = 16 * 1024 * 1024
+	x64SliverProfileADFLSeed  = byte(0)
+	x64SliverProfileMode      = "sliver-safe-schema"
 )
 
 var (
-	x64SentinelPayload = []byte{0xb8, 0xde, 0xc0, 0x37, 0x13, 0xc3} // mov eax, 0x1337c0de; ret
-	x64SafePayload     = []byte{0x90, 0x90, 0x90}                   // nop; nop; nop
+	x64SentinelPayload           = []byte{0xb8, 0xde, 0xc0, 0x37, 0x13, 0xc3} // mov eax, 0x1337c0de; ret
+	x64SysVEntryAlignmentPayload = []byte{
+		0x48, 0x89, 0xe0, // mov rax, rsp
+		0x83, 0xe0, 0x0f, // and eax, 0xf
+		0x83, 0xf8, 0x08, // cmp eax, 8
+		0x74, 0x02, // je aligned
+		0x0f, 0x0b, // ud2
+	}
+	x64SysVAlignedStackAccessPayload = []byte{
+		0x48, 0x83, 0xec, 0x08, // sub rsp, 8
+		0x0f, 0x28, 0x04, 0x24, // movaps xmm0, [rsp]
+		0x48, 0x83, 0xc4, 0x08, // add rsp, 8
+	}
+	x64GPRClobberPayload = []byte{
+		0x31, 0xc0, // xor eax, eax
+		0x31, 0xdb, // xor ebx, ebx
+		0x45, 0x31, 0xd2, // xor r10d, r10d
+		0x45, 0x31, 0xff, // xor r15d, r15d
+	}
+	x64GPRRestoreContinuation = []byte{
+		0x3d, 0x11, 0x11, 0x11, 0x11, // cmp eax, 0x11111111
+		0x75, 0x20, // jne failed
+		0x81, 0xfb, 0x22, 0x22, 0x22, 0x22, // cmp ebx, 0x22222222
+		0x75, 0x18, // jne failed
+		0x41, 0x81, 0xfa, 0x33, 0x33, 0x33, 0x33, // cmp r10d, 0x33333333
+		0x75, 0x0f, // jne failed
+		0x41, 0x81, 0xff, 0x44, 0x44, 0x44, 0x44, // cmp r15d, 0x44444444
+		0x75, 0x06, // jne failed
+		0xb8, 0xde, 0xc0, 0x37, 0x13, // mov eax, 0x1337c0de
+		0xc3,       // ret
+		0x0f, 0x0b, // failed: ud2
+	}
 )
+
+func TestWASMEncodeWithSeedX64SliverProfileEntryAlignment(t *testing.T) {
+	requireX64WASMExecution(t)
+	executeX64WASMSliverProfileCase(t, "sysv-entry-alignment", x64SysVEntryAlignmentPayload, x64SentinelPayload)
+}
+
+func TestWASMEncodeWithSeedX64SliverProfileAlignedStackAccess(t *testing.T) {
+	requireX64WASMExecution(t)
+	executeX64WASMSliverProfileCase(t, "aligned-stack-access", x64SysVAlignedStackAccessPayload, x64SentinelPayload)
+}
+
+func TestWASMEncodeWithSeedX64SliverProfileGPRRestoration(t *testing.T) {
+	requireX64WASMExecution(t)
+	executeX64WASMSliverProfileCase(t, "gpr-restoration", x64GPRClobberPayload, x64GPRRestoreContinuation)
+}
+
+func TestWASMEncodeWithSeedX64SliverProfileLargePayload(t *testing.T) {
+	requireX64WASMExecution(t)
+	payload := bytes.Repeat([]byte{0x90}, x64SliverLargePayloadSize)
+	// Decode every byte, then jump over the NOP body so this measures decoder
+	// correctness rather than runner speed. The final NOP reaches the suffix.
+	finalNOPDisplacement := int32(x64SliverLargePayloadSize - 6)
+	payload[0] = 0xe9
+	payload[1] = byte(finalNOPDisplacement)
+	payload[2] = byte(finalNOPDisplacement >> 8)
+	payload[3] = byte(finalNOPDisplacement >> 16)
+	payload[4] = byte(finalNOPDisplacement >> 24)
+	executeX64WASMSliverProfileCase(t, "large-payload", payload, x64SentinelPayload)
+}
 
 type x64ExecutionMode struct {
 	name             string
@@ -43,9 +105,7 @@ type x64ExecutionMode struct {
 // output in a separate process. Isolation keeps a malformed decoder from
 // terminating the Go test process before the exact replay inputs are logged.
 func TestWASMEncodeWithSeedX64ExecutionCorpus(t *testing.T) {
-	if os.Getenv("SGN_REQUIRE_EXECUTION") != "1" {
-		t.Skip("set SGN_REQUIRE_EXECUTION=1 to execute the x64 Wasm corpus")
-	}
+	requireX64WASMExecution(t)
 
 	modes := readX64ExecutionModes(t, filepath.Join("..", "tests", "execution_modes.tsv"))
 	runner := compileX64ExecutionRunner(t)
@@ -60,7 +120,7 @@ func TestWASMEncodeWithSeedX64ExecutionCorpus(t *testing.T) {
 			payload := x64SentinelPayload
 			continuation := []byte(nil)
 			if mode.saveRegisters {
-				payload = x64SafePayload
+				payload = x64SysVEntryAlignmentPayload
 				continuation = x64SentinelPayload
 			}
 
@@ -113,6 +173,90 @@ func TestWASMEncodeWithSeedX64ExecutionCorpus(t *testing.T) {
 	wantRuns := len(modes) * (int(^byte(0)) + 1)
 	if runs != wantRuns {
 		t.Fatalf("executed %d x64 Wasm corpus cases, want %d", runs, wantRuns)
+	}
+}
+
+func requireX64WASMExecution(t *testing.T) {
+	t.Helper()
+	if os.Getenv("SGN_REQUIRE_EXECUTION") != "1" {
+		t.Skip("set SGN_REQUIRE_EXECUTION=1 to execute the x64 Wasm corpus")
+	}
+}
+
+func executeX64WASMSliverProfileCase(t *testing.T, caseName string, payload, continuation []byte) {
+	t.Helper()
+	modes := readX64ExecutionModes(t, filepath.Join("..", "tests", "execution_modes.tsv"))
+	var mode *x64ExecutionMode
+	for index := range modes {
+		if modes[index].name == x64SliverProfileMode {
+			mode = &modes[index]
+			break
+		}
+	}
+	if mode == nil {
+		t.Fatalf("shared execution corpus does not contain exact Sliver profile %q", x64SliverProfileMode)
+	}
+
+	var randomSeed sgn.RandomSeed
+	encoder, err := sgn.NewEncoder(64)
+	if err != nil {
+		t.Fatalf("configure Sliver profile x64 encoder: %v", err)
+	}
+	encoder.ObfuscationLimit = mode.obfuscationLimit
+	encoder.PlainDecoder = mode.plainDecoder
+	encoder.Seed = x64SliverProfileADFLSeed
+	encoder.EncodingCount = mode.encodingCount
+	encoder.SaveRegisters = mode.saveRegisters
+
+	payloadDigest := sha256.Sum256(payload)
+	continuationDigest := sha256.Sum256(continuation)
+	initialMetadata := fmt.Sprintf(
+		"case=%s mode=%s arch=64 obf=%d plain=%t initial_adfl=0x%02x initial_count=%d safe=%t rng=%x payload_len=%d payload_sha256=%x continuation_len=%d continuation_sha256=%x",
+		caseName,
+		mode.name,
+		mode.obfuscationLimit,
+		mode.plainDecoder,
+		x64SliverProfileADFLSeed,
+		mode.encodingCount,
+		mode.saveRegisters,
+		randomSeed,
+		len(payload),
+		payloadDigest,
+		len(continuation),
+		continuationDigest,
+	)
+
+	output, err := encoder.EncodeWithSeed(payload, randomSeed)
+	if err != nil {
+		t.Fatalf("EncodeWithSeed failed for Sliver profile (%s): %v", initialMetadata, err)
+	}
+	outputDigest := sha256.Sum256(output)
+	executable := append([]byte(nil), output...)
+	executable = append(executable, continuation...)
+	metadata := fmt.Sprintf(
+		"%s output_len=%d output_sha256=%x executed_len=%d final_adfl=0x%02x final_count=%d",
+		initialMetadata,
+		len(output),
+		outputDigest,
+		len(executable),
+		encoder.Seed,
+		encoder.EncodingCount,
+	)
+
+	runner := compileX64ExecutionRunner(t)
+	shellcodePath := filepath.Join(t.TempDir(), "shellcode.bin")
+	if err := os.WriteFile(shellcodePath, executable, 0o600); err != nil {
+		t.Fatalf("write Sliver profile x64 shellcode (%s): %v", metadata, err)
+	}
+	status, runnerOutput, err := executeX64Shellcode(runner, shellcodePath)
+	if err != nil {
+		t.Fatalf(
+			"Sliver profile x64 Wasm shellcode did not execute (%s status=%s runner_output=%q): %v",
+			metadata,
+			status,
+			runnerOutput,
+			err,
+		)
 	}
 }
 
@@ -296,6 +440,10 @@ static const unsigned char trampoline[] = {
     0x41, 0x56,                   /* push r14 */
     0x41, 0x57,                   /* push r15 */
     0x48, 0x83, 0xec, 0x08,       /* align rsp to 16 bytes before call */
+    0xb8, 0x11, 0x11, 0x11, 0x11, /* mov eax, 0x11111111 */
+    0xbb, 0x22, 0x22, 0x22, 0x22, /* mov ebx, 0x22222222 */
+    0x41, 0xba, 0x33, 0x33, 0x33, 0x33, /* mov r10d, 0x33333333 */
+    0x41, 0xbf, 0x44, 0x44, 0x44, 0x44, /* mov r15d, 0x44444444 */
     0xe8, 0x0f, 0x00, 0x00, 0x00, /* call shellcode */
     0x48, 0x83, 0xc4, 0x08,       /* restore rsp after call */
     0x41, 0x5f,                   /* pop r15 */

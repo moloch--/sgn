@@ -86,7 +86,8 @@ reproducible fixtures, and debugging, not as the production default.
 - Small, loop-free ADFL decoder stub.
 - Optional schema encoding so the decoder also appears polymorphic.
 - Random value-preserving garbage instructions.
-- Optional safe mode that preserves register values.
+- Optional safe mode that preserves general-purpose registers after a
+  fallthrough payload.
 - Multiple recursive encoding passes.
 - ASCII and bad-character filtering in the Go CLI.
 
@@ -105,6 +106,11 @@ Each encoding pass:
 The schema wrapper places its decoder code before terminal encoded data. This
 lets safe-mode payloads fall through their register-restore suffix to the end of
 the complete output instead of re-entering schema-decoder instructions.
+Safe mode therefore requires the payload to fall through with RSP restored to
+its entry value; a payload that returns before the generated suffix bypasses
+restoration. On x64, the save wrapper uses 16 stack slots so the payload retains
+its incoming ABI stack alignment. It restores general-purpose registers, not
+RFLAGS, XMM/SIMD, or x87 state.
 
 <p align="center">
   <img src=".github/flow.png" alt="SGN encoding flow">
@@ -223,7 +229,7 @@ Flags:
   -M, --max=50             Maximum decoder-obfuscation bytes
       --plain              Do not encode the decoder stub
       --ascii              Require fully ASCII-printable output
-  -S, --safe               Preserve register values
+  -S, --safe               Preserve general-purpose registers after fallthrough
       --badchars=STRING    Avoid bytes such as \\x00\\x0a
   -v, --verbose            Verbose output
       --version            Print version
@@ -299,9 +305,13 @@ profile. Failures include the complete replay tuple and child exit or signal.
 
 On Linux x64, `make test-wasm-execution` independently runs all 1,792 outputs
 returned by the public Go `EncodeWithSeed` method in isolated child processes.
-This composes the embedded-Wasm wrapper with real decoder execution instead of
-relying only on native/Wasm byte equality. Production encoding continues to use
-operating-system randomness.
+Every x64 safe-mode corpus case asserts SysV entry alignment. The suite also
+executes the exact Sliver safe/schema profile with an aligned SIMD stack access,
+representative GPR clobber/restoration, and a 16 MiB payload that exercises the
+complete decoder loop. Native Rust runs the same regressions. This composes the
+embedded-Wasm wrapper with real decoder execution instead of relying only on
+native/Wasm byte equality.
+Production encoding continues to use operating-system randomness.
 
 ## Notes on the Rust port
 

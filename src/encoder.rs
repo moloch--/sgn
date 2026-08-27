@@ -16,6 +16,10 @@ pub const X86_SAVE_PREFIX: &[u8] = &[0x60, 0x9c];
 pub const X86_SAVE_SUFFIX: &[u8] = &[0x9d, 0x61];
 
 /// x64 register-save prefix: push all general-purpose registers.
+///
+/// The trailing duplicate `PUSH RAX` makes the wrapper consume 16 stack slots,
+/// preserving x64 ABI entry alignment while retaining the printable fixed-byte
+/// set required by safe+ASCII constrained encoding.
 pub const X64_SAVE_PREFIX: &[u8] = &[
     0x50, 0x53, 0x51, 0x52, // PUSH RAX,RBX,RCX,RDX
     0x56, 0x57, 0x55, // PUSH RSI,RDI,RBP
@@ -23,9 +27,12 @@ pub const X64_SAVE_PREFIX: &[u8] = &[
     0x41, 0x52, 0x41, 0x53, // PUSH R10,R11
     0x41, 0x54, 0x41, 0x55, // PUSH R12,R13
     0x41, 0x56, 0x41, 0x57, // PUSH R14,R15
+    0x50, // duplicate PUSH RAX alignment slot
 ];
-/// x64 register-restore suffix: pop all general-purpose registers.
+/// x64 register-restore suffix: discard the alignment slot and restore all
+/// general-purpose registers.
 pub const X64_SAVE_SUFFIX: &[u8] = &[
+    0x58, // POP RAX alignment slot
     0x41, 0x5f, 0x41, 0x5e, // POP R15,R14
     0x41, 0x5d, 0x41, 0x5c, // POP R13,R12
     0x41, 0x5b, 0x41, 0x5a, // POP R11,R10
@@ -80,7 +87,9 @@ pub struct Encoder {
     pub seed: u8,
     /// Number of times to (recursively) encode the payload.
     pub encoding_count: u32,
-    /// When true, wrap output so all registers are preserved.
+    /// When true, wrap output so general-purpose registers are restored after a
+    /// fallthrough payload that returns RSP to its entry value. On x64 this does
+    /// not restore RFLAGS, XMM/SIMD, or x87 state.
     pub save_registers: bool,
 }
 
@@ -278,5 +287,21 @@ mod tests {
         assert!(!output.is_empty());
         assert_eq!(encoder.seed, 0);
         assert_eq!(encoder.encoding_count, 1);
+    }
+
+    #[test]
+    fn x64_safe_wrapper_preserves_entry_alignment_and_ascii_compatibility() {
+        assert_eq!(X64_SAVE_PREFIX.last(), Some(&0x50));
+        assert_eq!(X64_SAVE_SUFFIX.first(), Some(&0x58));
+        assert!(X64_SAVE_PREFIX[..X64_SAVE_PREFIX.len() - 1].contains(&0x50));
+        assert!(X64_SAVE_SUFFIX[1..].contains(&0x58));
+        assert_eq!(X64_SAVE_PREFIX.len(), X64_SAVE_SUFFIX.len());
+        assert!(
+            X64_SAVE_PREFIX
+                .iter()
+                .chain(X64_SAVE_SUFFIX)
+                .all(|byte| (0x20..=0x7e).contains(byte)),
+            "x64 safe wrapper contains a fixed non-ASCII byte"
+        );
     }
 }
