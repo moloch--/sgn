@@ -235,12 +235,14 @@ sgn -i shellcode.bin -o encoded.bin -a 64 --badchars '\x00\x0a\x0d'
 
 Rust source changes must be accompanied by a refreshed embedded module. All
 Cargo commands use `--locked`, and the Makefile uses Rust 1.94.0 so the tracked
-artifact can be reproduced in CI. The Wasm build also remaps the checkout and
-Cargo-home source paths to stable prefixes, keeping local paths out of the
-binary and making the byte comparison portable across builders.
+artifact can be reproduced in CI. The Wasm-only Cargo profile preserves symbols
+through linking because link-time stripping can reorder internal functions on
+different compiler hosts. A repo-local Go tool then removes non-semantic custom
+sections deterministically. Together with stable source-path remapping, this
+makes the final byte comparison portable across builders.
 
 ```sh
-# Build target/wasm32-wasip1/release/sgn.wasm and copy it into pkg/sgn.wasm.
+# Build and normalize the module, then copy it into pkg/sgn.wasm.
 make wasm-update
 
 # Independently rebuild and fail if the tracked copy differs.

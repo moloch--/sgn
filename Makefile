@@ -8,19 +8,24 @@ BINARY ?= $(BUILD_DIR)/sgn
 VERSION ?= $(shell git describe --tags --always --dirty)
 
 RUST_WASM_TARGET ?= wasm32-wasip1
-RUST_WASM := target/$(RUST_WASM_TARGET)/release/sgn.wasm
+RUST_WASM_PROFILE ?= wasm-release
+RUST_WASM_RAW := target/$(RUST_WASM_TARGET)/$(RUST_WASM_PROFILE)/sgn.wasm
+RUST_WASM := target/$(RUST_WASM_TARGET)/$(RUST_WASM_PROFILE)/sgn.normalized.wasm
 EMBEDDED_WASM := pkg/sgn.wasm
 COMPAT_ORACLE := $(abspath target/release/examples/compat_oracle)
-WASM_RUSTFLAGS := $(strip $(RUSTFLAGS) --remap-path-prefix=$(CURDIR)=/sgn --remap-path-prefix=$(CARGO_HOME_PATH)=/cargo)
+WASM_RUSTFLAGS := --remap-path-prefix=$(CURDIR)=/sgn --remap-path-prefix=$(CARGO_HOME_PATH)=/cargo
+WASM_NORMALIZER ?= $(GO) run ./internal/cmd/wasmstrip
 
 GO_BUILD_FLAGS := -trimpath -ldflags="-s -w -X github.com/moloch--/sgn/config.Version=$(VERSION)"
 GO_TEST_FLAGS ?=
 
 .DEFAULT_GOAL := build
 
-# Build the Rust cdylib for WASI without also building the Rust CLI binary.
+# Preserve symbols through linking so rustc hosts agree on function order, then
+# remove non-semantic Wasm custom sections with the repo-local normalizer.
 wasm-build:
-	RUSTFLAGS="$(WASM_RUSTFLAGS)" $(CARGO) build --locked --release --target $(RUST_WASM_TARGET) --lib
+	CARGO_INCREMENTAL=0 RUSTFLAGS="$(WASM_RUSTFLAGS)" $(CARGO) build --locked --profile $(RUST_WASM_PROFILE) --target $(RUST_WASM_TARGET) --lib
+	$(WASM_NORMALIZER) -o $(RUST_WASM) $(RUST_WASM_RAW)
 
 # Refresh the tracked module embedded by pkg/wasm.go after changing Rust code.
 wasm-update: wasm-build

@@ -36,3 +36,9 @@ lto = true
 codegen-units = 1
 strip = true          # drop symbols/debug info from the static binary
 panic = "abort"       # no unwinder in the release binary (smaller, fully static)
+
+# Link-time stripping can reorder internal Wasm functions across rustc hosts.
+# Keep metadata through linking, then remove custom sections deterministically.
+[profile.wasm-release]
+inherits = "release"
+strip = false
