@@ -35,12 +35,12 @@ pub type Schema = Vec<SchemaOp>;
 /// `GetRandomByte` used `rand.Intn(255)`, which could never yield 255; using
 /// the whole byte range restores a bit of key entropy.
 pub fn random_byte<R: Rng>(rng: &mut R) -> u8 {
-    rng.gen()
+    rng.gen::<u8>()
 }
 
 /// Returns `true`/`false` with equal probability.
 pub fn coin_flip<R: Rng>(rng: &mut R) -> bool {
-    rng.gen()
+    rng.gen::<bool>()
 }
 
 /// Applies the ADFL cipher in place.
@@ -61,10 +61,10 @@ pub fn cipher_adfl(data: &mut [u8], mut seed: u8) {
 /// Builds a random schema of `count` steps with random operations and keys.
 pub fn new_cipher_schema<R: Rng>(rng: &mut R, count: usize) -> Schema {
     (0..count)
-        .map(|_| match rng.gen_range(0..6) {
-            0 => SchemaOp::Xor(rng.gen()),
-            1 => SchemaOp::Add(rng.gen()),
-            2 => SchemaOp::Sub(rng.gen()),
+        .map(|_| match rng.gen_range(0u32..6) {
+            0 => SchemaOp::Xor(rng.gen::<u32>()),
+            1 => SchemaOp::Add(rng.gen::<u32>()),
+            2 => SchemaOp::Sub(rng.gen::<u32>()),
             3 => SchemaOp::Rol(random_byte(rng)),
             4 => SchemaOp::Ror(random_byte(rng)),
             _ => SchemaOp::Not,

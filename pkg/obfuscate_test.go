@@ -1,7 +1,6 @@
 package sgn
 
 import (
-	"math/rand"
 	"strconv"
 	"strings"
 	"testing"
@@ -9,7 +8,6 @@ import (
 )
 
 func TestRandomLabelFormat(t *testing.T) {
-	rand.New(rand.NewSource(10))
 	label := RandomLabel()
 	if len(label) != 5 {
 		t.Fatalf("expected random label length 5, got %d", len(label))
@@ -22,7 +20,6 @@ func TestRandomLabelFormat(t *testing.T) {
 }
 
 func TestGetRandomOperandValueFormats(t *testing.T) {
-	rand.New(rand.NewSource(11))
 	encoder := &Encoder{architecture: 64}
 
 	if val := encoder.GetRandomOperandValue("imm8"); !strings.HasPrefix(val, "0x") {
@@ -48,7 +45,6 @@ func TestGetRandomOperandValueFormats(t *testing.T) {
 		t.Fatalf("expected memory operand with PTR syntax, got %q", memVal)
 	}
 
-	rand.New(rand.NewSource(12))
 	tableVal := encoder.GetRandomOperandValue("r/m16")
 	if len(tableVal) == 0 {
 		t.Fatal("expected r/m16 operand to be non-empty")
@@ -56,7 +52,6 @@ func TestGetRandomOperandValueFormats(t *testing.T) {
 }
 
 func TestGetRandomUnsafeAssemblyContainsRegister(t *testing.T) {
-	rand.New(rand.NewSource(13))
 	encoder := &Encoder{architecture: 64}
 	dest := "RAX"
 
@@ -83,16 +78,27 @@ func TestGetRandomUnsafeAssemblyContainsRegister(t *testing.T) {
 		return
 	}
 	if strings.HasPrefix(second, "0x") {
-		if _, err := strconv.ParseInt(second, 0, 64); err != nil {
+		if _, err := strconv.ParseUint(strings.TrimPrefix(second, "0x"), 16, 64); err != nil {
 			t.Fatalf("expected numeric immediate operand, got %q", second)
 		}
 		return
 	}
 	upper := strings.ToUpper(second)
-	if include(SupportedOperandTypes, upper) {
+	if isConcreteRegister(upper) {
 		return
 	}
 	t.Fatalf("expected second operand to be numeric, memory, or register, got %q", second)
+}
+
+func isConcreteRegister(value string) bool {
+	for _, registers := range REGS {
+		for _, register := range registers {
+			if value == register.Full || value == register.Extended || value == register.High || value == register.Low {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func TestIncludeHelper(t *testing.T) {

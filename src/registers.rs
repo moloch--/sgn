@@ -103,13 +103,17 @@ fn random_index<R: Rng>(rng: &mut R, arch: u32, exclude: &[usize]) -> Option<usi
     if candidates.is_empty() {
         None
     } else {
-        Some(candidates[rng.gen_range(0..candidates.len())])
+        // Preserve the upstream 64-bit native stream while making WebAssembly
+        // consume the same fixed-width samples instead of platform-sized
+        // `usize` values.
+        let index = rng.gen_range(0u64..candidates.len() as u64) as usize;
+        Some(candidates[index])
     }
 }
 
 /// Picks any full-size GP register index (used for value-preserving garbage).
 pub fn random_gp<R: Rng>(rng: &mut R, arch: u32) -> usize {
-    rng.gen_range(0..pool_size(arch))
+    rng.gen_range(0u64..pool_size(arch) as u64) as usize
 }
 
 /// Picks a full-size register usable as the decoder's payload-pointer base,
@@ -131,6 +135,7 @@ pub fn random_low<R: Rng>(rng: &mut R, arch: u32, base_idx: usize) -> Option<usi
     if candidates.is_empty() {
         None
     } else {
-        Some(candidates[rng.gen_range(0..candidates.len())])
+        let index = rng.gen_range(0u64..candidates.len() as u64) as usize;
+        Some(candidates[index])
     }
 }

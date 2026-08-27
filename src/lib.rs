@@ -24,5 +24,8 @@ pub mod obfuscate;
 pub mod registers;
 pub mod util;
 
+#[cfg(target_arch = "wasm32")]
+mod wasm;
+
 pub use cipher::{cipher_adfl, new_cipher_schema, schema_cipher, Schema, SchemaOp};
-pub use encoder::{Encoder, Error};
+pub use encoder::{Encoder, Error, RANDOM_SEED_SIZE};

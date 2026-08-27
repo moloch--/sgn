@@ -64,7 +64,11 @@ struct Cli {
 
 /// Parses a bad-character hex string such as `\x00\x0a` (or `000a`) into bytes.
 fn parse_bad_chars(s: &str) -> Result<Vec<u8>, String> {
-    let cleaned: String = s.replace("\\x", "").chars().filter(|c| !c.is_whitespace()).collect();
+    let cleaned: String = s
+        .replace("\\x", "")
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
     if cleaned.is_empty() {
         return Ok(Vec::new());
     }
@@ -111,7 +115,10 @@ fn main() -> ExitCode {
 
     print_verbose(&format!("Architecture: x{}", encoder.architecture));
     print_verbose(&format!("Encode Count: {}", encoder.encoding_count));
-    print_verbose(&format!("Max. Obfuscation Size: {}", encoder.obfuscation_limit));
+    print_verbose(&format!(
+        "Max. Obfuscation Size: {}",
+        encoder.obfuscation_limit
+    ));
     print_verbose(&format!("Bad Characters: {}", hex(&bad_bytes)));
     print_verbose(&format!("ASCII Mode: {}", cli.ascii));
     print_verbose(&format!("Plain Decoder: {}", encoder.plain_decoder));
@@ -203,7 +210,11 @@ fn hex_dump(data: &[u8]) -> String {
             if j == 7 {
                 hexpart.push(' ');
             }
-            ascii.push(if (0x20..=0x7e).contains(&b) { b as char } else { '.' });
+            ascii.push(if (0x20..=0x7e).contains(&b) {
+                b as char
+            } else {
+                '.'
+            });
         }
         out.push_str(&format!("{:08x}  {:<49}|{}|\n", i * 16, hexpart, ascii));
     }

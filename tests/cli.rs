@@ -17,7 +17,12 @@ fn encodes_a_file() {
     std::fs::write(&input, b"\x90\x90\x90\xc3").unwrap();
 
     let status = Command::new(bin())
-        .args(["-i", input.to_str().unwrap(), "-o", output.to_str().unwrap()])
+        .args([
+            "-i",
+            input.to_str().unwrap(),
+            "-o",
+            output.to_str().unwrap(),
+        ])
         .status()
         .unwrap();
     assert!(status.success());

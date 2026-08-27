@@ -1,31 +1,93 @@
-CURRENT_DIR=$(shell pwd)
-BINARY=./build/sgn
-BUILD=CGO_ENABLED=0 go build
-OUT_DIR=${CURRENT_DIR}/build
-BUILD_FLAGS=-trimpath -ldflags="-s -w -X github.com/moloch--/sgn/config.Version=`git describe --tags --always --dirty`" 
+GO ?= go
+RUST_TOOLCHAIN ?= 1.94.0
+CARGO ?= cargo +$(RUST_TOOLCHAIN)
+CARGO_HOME_PATH ?= $(if $(CARGO_HOME),$(CARGO_HOME),$(HOME)/.cargo)
 
-# Builds the project
-default:
-	${BUILD} ${BUILD_FLAGS} -o ${OUT_DIR}/
-# Builds the project with full static linking
-static:
-	${BUILD} -o ${OUT_DIR}/
+BUILD_DIR ?= build
+BINARY ?= $(BUILD_DIR)/sgn
+VERSION ?= $(shell git describe --tags --always --dirty)
 
-386:
-	GOARCH=386 ${BUILD} ${BUILD_FLAGS} -o ${OUT_DIR}/
-linux_amd64:
-	GOOS=linux  GOARCH=amd64 ${BUILD} ${BUILD_FLAGS} -o ${OUT_DIR}/
-linux_386:
-	GOOS=linux  GOARCH=386 ${BUILD} ${BUILD_FLAGS} -o ${OUT_DIR}/
-windows_amd64:
-	GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -trimpath -o ${OUT_DIR}/sgn.exe
-windows_386:
-	GOOS=windows GOARCH=386 go build -ldflags="-s -w" -trimpath -o ${OUT_DIR}/sgn32.exe
-darwin_amd64:
-	GOOS=darwin GOARCH=amd64 ${BUILD} ${BUILD_FLAGS} -o ${OUT_DIR}/ 
+RUST_WASM_TARGET ?= wasm32-wasip1
+RUST_WASM := target/$(RUST_WASM_TARGET)/release/sgn.wasm
+EMBEDDED_WASM := pkg/sgn.wasm
+COMPAT_ORACLE := $(abspath target/release/examples/compat_oracle)
+WASM_RUSTFLAGS := $(strip $(RUSTFLAGS) --remap-path-prefix=$(CURDIR)=/sgn --remap-path-prefix=$(CARGO_HOME_PATH)=/cargo)
 
-# Cleans our project: deletes binaries
+GO_BUILD_FLAGS := -trimpath -ldflags="-s -w -X github.com/moloch--/sgn/config.Version=$(VERSION)"
+GO_TEST_FLAGS ?=
+
+.DEFAULT_GOAL := build
+
+# Build the Rust cdylib for WASI without also building the Rust CLI binary.
+wasm-build:
+	RUSTFLAGS="$(WASM_RUSTFLAGS)" $(CARGO) build --locked --release --target $(RUST_WASM_TARGET) --lib
+
+# Refresh the tracked module embedded by pkg/wasm.go after changing Rust code.
+wasm-update: wasm-build
+	cp $(RUST_WASM) $(EMBEDDED_WASM)
+
+# Rebuild independently and fail if the tracked embedded module is stale.
+wasm-verify: wasm-build
+	cmp $(RUST_WASM) $(EMBEDDED_WASM) || { \
+		echo "$(EMBEDDED_WASM) is stale; run 'make wasm-update' and commit it" >&2; \
+		exit 1; \
+	}
+
+go-build: wasm-verify
+	mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 $(GO) build $(GO_BUILD_FLAGS) -o $(BINARY) .
+
+build: go-build
+
+# Preserve the historical default target name.
+default: build
+
+static: wasm-verify
+	mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 $(GO) build -o $(BINARY) .
+
+test-rust:
+	$(CARGO) test --locked
+
+test-go: wasm-verify
+	$(GO) test $(GO_TEST_FLAGS) ./...
+
+# Compare native Rust and embedded Rust/Wasm byte-for-byte under fixed seeds.
+test-compat: wasm-verify
+	$(CARGO) build --locked --release --example compat_oracle
+	SGN_NATIVE_ORACLE="$(COMPAT_ORACLE)" $(GO) test ./pkg -run '^(TestNativeRustWASMCompatibility|TestUpstreamRustGoldenVector)$$' -count=1
+
+test: test-rust test-go test-compat
+
+386: wasm-verify
+	mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 GOARCH=386 $(GO) build $(GO_BUILD_FLAGS) -o $(BINARY) .
+
+linux_amd64: wasm-verify
+	mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GO_BUILD_FLAGS) -o $(BINARY) .
+
+linux_386: wasm-verify
+	mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 GOOS=linux GOARCH=386 $(GO) build $(GO_BUILD_FLAGS) -o $(BINARY) .
+
+windows_amd64: wasm-verify
+	mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build -trimpath -ldflags="-s -w" -o $(BUILD_DIR)/sgn.exe .
+
+windows_386: wasm-verify
+	mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 GOOS=windows GOARCH=386 $(GO) build -trimpath -ldflags="-s -w" -o $(BUILD_DIR)/sgn32.exe .
+
+darwin_amd64: wasm-verify
+	mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 $(GO) build $(GO_BUILD_FLAGS) -o $(BINARY) .
+
 clean:
+	$(CARGO) clean
 	rm -rf ./build
 
-.PHONY: clean install
+.PHONY: \
+	build clean darwin_amd64 default go-build linux_386 linux_amd64 static test \
+	test-compat test-go test-rust wasm-build wasm-update wasm-verify windows_386 \
+	windows_amd64 386

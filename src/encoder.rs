@@ -3,7 +3,12 @@
 use crate::cipher::{cipher_adfl, new_cipher_schema, random_byte, schema_cipher};
 use crate::decoder::{add_adfl_decoder, add_schema_decoder, DecoderError};
 use crate::obfuscate::generate_garbage;
-use rand::Rng;
+use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha20Rng;
+
+/// Size, in bytes, of the deterministic random seed accepted by
+/// [`Encoder::encode_with_seed`].
+pub const RANDOM_SEED_SIZE: usize = 32;
 
 /// x86 register-save prefix: `PUSHAD; PUSHFD`.
 pub const X86_SAVE_PREFIX: &[u8] = &[0x60, 0x9c];
@@ -129,6 +134,21 @@ impl Encoder {
         self.encode_with(&mut rng, payload.to_vec())
     }
 
+    /// Encodes `payload` deterministically from a 256-bit ChaCha20 seed.
+    ///
+    /// This is a convenience adapter over [`Encoder::encode_with`], so seeded
+    /// native callers and the WebAssembly ABI execute the same core pipeline.
+    /// Production callers that do not need replayable output should use
+    /// [`Encoder::encode`], which seeds its RNG from the operating system.
+    pub fn encode_with_seed(
+        &mut self,
+        payload: &[u8],
+        seed: [u8; RANDOM_SEED_SIZE],
+    ) -> Result<Vec<u8>, Error> {
+        let mut rng = ChaCha20Rng::from_seed(seed);
+        self.encode_with(&mut rng, payload.to_vec())
+    }
+
     /// Encodes `payload` using the supplied RNG. This is the core pipeline:
     ///
     /// 1. optionally append the register-restore suffix (safe mode);
@@ -190,5 +210,73 @@ impl Encoder {
         }
 
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn configured_encoder() -> Encoder {
+        Encoder {
+            architecture: 64,
+            obfuscation_limit: 32,
+            plain_decoder: false,
+            seed: 0xa7,
+            encoding_count: 3,
+            save_registers: true,
+        }
+    }
+
+    #[test]
+    fn fixed_seed_replays_output_and_final_state() {
+        let rng_seed = [0x42; RANDOM_SEED_SIZE];
+        let payload = b"fixed-seed compatibility payload";
+        let mut first = configured_encoder();
+        let mut second = configured_encoder();
+
+        let first_output = first.encode_with_seed(payload, rng_seed).unwrap();
+        let second_output = second.encode_with_seed(payload, rng_seed).unwrap();
+
+        assert_eq!(first_output, second_output);
+        assert_eq!(first.seed, second.seed);
+        assert_eq!(first.encoding_count, 1);
+        assert_eq!(second.encoding_count, 1);
+    }
+
+    #[test]
+    fn fixed_seed_adapter_uses_encode_with_pipeline() {
+        let rng_seed = [0x19; RANDOM_SEED_SIZE];
+        let payload = b"single deterministic pipeline";
+        let mut helper = configured_encoder();
+        let mut direct = configured_encoder();
+        let mut rng = ChaCha20Rng::from_seed(rng_seed);
+
+        let helper_output = helper.encode_with_seed(payload, rng_seed).unwrap();
+        let direct_output = direct.encode_with(&mut rng, payload.to_vec()).unwrap();
+
+        assert_eq!(helper_output, direct_output);
+        assert_eq!(helper.seed, direct.seed);
+        assert_eq!(helper.encoding_count, direct.encoding_count);
+    }
+
+    #[test]
+    fn fixed_seed_accepts_empty_payload_without_panicking() {
+        let mut encoder = Encoder {
+            architecture: 32,
+            obfuscation_limit: 0,
+            plain_decoder: true,
+            seed: 0,
+            encoding_count: 1,
+            save_registers: false,
+        };
+
+        let output = encoder
+            .encode_with_seed(&[], [0; RANDOM_SEED_SIZE])
+            .unwrap();
+
+        assert!(!output.is_empty());
+        assert_eq!(encoder.seed, 0);
+        assert_eq!(encoder.encoding_count, 1);
     }
 }

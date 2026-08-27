@@ -64,12 +64,7 @@ pub fn add_adfl_decoder<R: Rng>(
 
 /// x64 ADFL stub. Uses a RIP-relative `lea` to locate the payload that follows
 /// the stub, then `[base + rcx - 1]` indexing to decode from last byte to first.
-fn build_adfl_x64(
-    base: usize,
-    key: usize,
-    seed: u8,
-    size: usize,
-) -> Result<Vec<u8>, IcedError> {
+fn build_adfl_x64(base: usize, key: usize, seed: u8, size: usize) -> Result<Vec<u8>, IcedError> {
     let mut a = CodeAssembler::new(64)?;
     let mut data = a.create_label();
 
@@ -93,12 +88,7 @@ fn build_adfl_x64(
 /// distance to the appended payload into the memory displacement. The
 /// displacement depends only on the stub's own length, so it is resolved with a
 /// cheap two-pass assemble (the placeholder keeps the same disp8 encoding).
-fn build_adfl_x86(
-    base: usize,
-    key: usize,
-    seed: u8,
-    size: usize,
-) -> Result<Vec<u8>, IcedError> {
+fn build_adfl_x86(base: usize, key: usize, seed: u8, size: usize) -> Result<Vec<u8>, IcedError> {
     let key_reg = low32(key).expect("32-bit key register must have a low byte");
     let base_reg = reg32(base);
 

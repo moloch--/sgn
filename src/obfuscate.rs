@@ -56,7 +56,7 @@ fn emit_jcc<R: Rng>(
     rng: &mut R,
     label: iced_x86::code_asm::CodeLabel,
 ) -> Result<(), IcedError> {
-    match rng.gen_range(0..30) {
+    match rng.gen_range(0u32..30) {
         0 => a.ja(label),
         1 => a.jae(label),
         2 => a.jb(label),
@@ -97,7 +97,7 @@ fn emit_cmov<R: Rng>(
     arch: u32,
     ri: usize,
 ) -> Result<(), IcedError> {
-    match rng.gen_range(0..30) {
+    match rng.gen_range(0u32..30) {
         0 => rr!(a, arch, ri, cmova),
         1 => rr!(a, arch, ri, cmovae),
         2 => rr!(a, arch, ri, cmovb),
@@ -150,9 +150,9 @@ fn emit_garbage<R: Rng>(
     // forms for i32 (sign-extended imm32), and accepts i32 for r32 and shifts.
     let k = rng.gen::<u8>() as i32;
 
-    match rng.gen_range(0..8) {
+    match rng.gen_range(0u32..8) {
         // Zero-operand, no-effect instructions.
-        0 => match rng.gen_range(0..8) {
+        0 => match rng.gen_range(0u32..8) {
             0 => a.nop()?,
             1 => a.cld()?,
             2 => a.clc()?,
@@ -163,7 +163,7 @@ fn emit_garbage<R: Rng>(
             _ => a.ftst()?,
         },
         // Shift / rotate by zero (value- and flag-preserving).
-        1 => match rng.gen_range(0..7) {
+        1 => match rng.gen_range(0u32..7) {
             0 => ri!(a, arch, idx, rol, 0i32),
             1 => ri!(a, arch, idx, ror, 0i32),
             2 => ri!(a, arch, idx, shl, 0i32),
@@ -173,13 +173,13 @@ fn emit_garbage<R: Rng>(
             _ => ri!(a, arch, idx, sar, 0i32),
         },
         // Arithmetic with identity operand.
-        2 => match rng.gen_range(0..3) {
+        2 => match rng.gen_range(0u32..3) {
             0 => ri!(a, arch, idx, xor, 0i32),
             1 => ri!(a, arch, idx, sub, 0i32),
             _ => ri!(a, arch, idx, add, 0i32),
         },
         // reg,reg no-ops.
-        3 => match rng.gen_range(0..7) {
+        3 => match rng.gen_range(0u32..7) {
             0 => rr!(a, arch, idx, and),
             1 => rr!(a, arch, idx, or),
             2 => rr!(a, arch, idx, bt),
@@ -204,7 +204,7 @@ fn emit_garbage<R: Rng>(
         }
         // Self-cancelling unary pair wrapping nested garbage.
         6 => {
-            let (first, second): (u8, u8) = match rng.gen_range(0..4) {
+            let (first, second): (u8, u8) = match rng.gen_range(0u32..4) {
                 0 => (0, 0), // not / not
                 1 => (1, 1), // neg / neg
                 2 => (2, 3), // inc / dec
@@ -215,30 +215,28 @@ fn emit_garbage<R: Rng>(
             emit_unary(a, arch, idx, second)?;
         }
         // Self-cancelling binary pair wrapping nested garbage.
-        _ => {
-            match rng.gen_range(0..4) {
-                0 => {
-                    ri!(a, arch, idx, add, k);
-                    emit_garbage(a, rng, arch, depth - 1)?;
-                    ri!(a, arch, idx, sub, k);
-                }
-                1 => {
-                    ri!(a, arch, idx, sub, k);
-                    emit_garbage(a, rng, arch, depth - 1)?;
-                    ri!(a, arch, idx, add, k);
-                }
-                2 => {
-                    ri!(a, arch, idx, rol, k);
-                    emit_garbage(a, rng, arch, depth - 1)?;
-                    ri!(a, arch, idx, ror, k);
-                }
-                _ => {
-                    ri!(a, arch, idx, ror, k);
-                    emit_garbage(a, rng, arch, depth - 1)?;
-                    ri!(a, arch, idx, rol, k);
-                }
+        _ => match rng.gen_range(0u32..4) {
+            0 => {
+                ri!(a, arch, idx, add, k);
+                emit_garbage(a, rng, arch, depth - 1)?;
+                ri!(a, arch, idx, sub, k);
             }
-        }
+            1 => {
+                ri!(a, arch, idx, sub, k);
+                emit_garbage(a, rng, arch, depth - 1)?;
+                ri!(a, arch, idx, add, k);
+            }
+            2 => {
+                ri!(a, arch, idx, rol, k);
+                emit_garbage(a, rng, arch, depth - 1)?;
+                ri!(a, arch, idx, ror, k);
+            }
+            _ => {
+                ri!(a, arch, idx, ror, k);
+                emit_garbage(a, rng, arch, depth - 1)?;
+                ri!(a, arch, idx, rol, k);
+            }
+        },
     }
 
     Ok(())
@@ -263,7 +261,7 @@ fn emit_garbage_jump<R: Rng>(
 ) -> Result<(), IcedError> {
     let mut over = a.create_label();
     a.jmp(over)?;
-    let junk: Vec<u8> = (0..count).map(|_| rng.gen()).collect();
+    let junk: Vec<u8> = (0..count).map(|_| rng.gen::<u8>()).collect();
     a.db(&junk)?;
     a.set_label(&mut over)?;
     a.zero_bytes()?;
@@ -307,7 +305,7 @@ pub fn generate_garbage<R: Rng>(
 }
 
 fn coin<R: Rng>(rng: &mut R) -> bool {
-    rng.gen()
+    rng.gen::<bool>()
 }
 
 /// Computes the average size of generated garbage instructions over 100 samples.

@@ -51,7 +51,7 @@ unsafe fn run(shell: &[u8]) -> Option<u64> {
     let page = libc::sysconf(libc::_SC_PAGESIZE) as usize;
     let len = code.len().div_ceil(page) * page;
 
-    // Try a directly-RWX mapping first; fall back to RW + mprotect(RWX).
+    // Try a directly-RWX mapping first; fall back to RW + mprotect(RX).
     let mut mem = libc::mmap(
         std::ptr::null_mut(),
         len,
@@ -73,7 +73,7 @@ unsafe fn run(shell: &[u8]) -> Option<u64> {
             return None;
         }
         std::ptr::copy_nonoverlapping(code.as_ptr(), mem as *mut u8, code.len());
-        if libc::mprotect(mem, len, libc::PROT_READ | libc::PROT_EXEC | libc::PROT_WRITE) != 0 {
+        if libc::mprotect(mem, len, libc::PROT_READ | libc::PROT_EXEC) != 0 {
             libc::munmap(mem, len);
             return None;
         }
@@ -87,6 +87,21 @@ unsafe fn run(shell: &[u8]) -> Option<u64> {
     Some(result)
 }
 
+fn execution_required() -> bool {
+    std::env::var_os("SGN_REQUIRE_EXECUTION").is_some()
+}
+
+fn run_or_skip(shell: &[u8]) -> Option<u64> {
+    let result = unsafe { run(shell) };
+    if result.is_none() {
+        if execution_required() {
+            panic!("executable memory is unavailable while SGN_REQUIRE_EXECUTION is set");
+        }
+        eprintln!("skipped: executable memory unavailable");
+    }
+    result
+}
+
 fn encode(configure: impl FnOnce(&mut Encoder)) -> Vec<u8> {
     let mut enc = Encoder::new(64).unwrap();
     configure(&mut enc);
@@ -96,16 +111,20 @@ fn encode(configure: impl FnOnce(&mut Encoder)) -> Vec<u8> {
 #[test]
 fn default_schema_encoding_executes() {
     let code = encode(|_| {});
-    match unsafe { run(&code) } {
-        Some(v) => assert_eq!(v & 0xffff_ffff, MAGIC, "decoded payload returned wrong value"),
-        None => eprintln!("skipped: executable memory unavailable"),
+    match run_or_skip(&code) {
+        Some(v) => assert_eq!(
+            v & 0xffff_ffff,
+            MAGIC,
+            "decoded payload returned wrong value"
+        ),
+        None => return,
     }
 }
 
 #[test]
 fn plain_decoder_executes() {
     let code = encode(|e| e.plain_decoder = true);
-    if let Some(v) = unsafe { run(&code) } {
+    if let Some(v) = run_or_skip(&code) {
         assert_eq!(v & 0xffff_ffff, MAGIC);
     }
 }
@@ -113,7 +132,7 @@ fn plain_decoder_executes() {
 #[test]
 fn multiple_encoding_layers_execute() {
     let code = encode(|e| e.encoding_count = 3);
-    if let Some(v) = unsafe { run(&code) } {
+    if let Some(v) = run_or_skip(&code) {
         assert_eq!(v & 0xffff_ffff, MAGIC);
     }
 }
@@ -121,7 +140,7 @@ fn multiple_encoding_layers_execute() {
 #[test]
 fn zero_obfuscation_executes() {
     let code = encode(|e| e.obfuscation_limit = 0);
-    if let Some(v) = unsafe { run(&code) } {
+    if let Some(v) = run_or_skip(&code) {
         assert_eq!(v & 0xffff_ffff, MAGIC);
     }
 }
@@ -140,7 +159,7 @@ fn safe_registers_plain_executes() {
     let mut code = enc.encode(nop_payload).unwrap();
     code.extend_from_slice(PAYLOAD); // continuation: mov eax, MAGIC; ret
 
-    if let Some(v) = unsafe { run(&code) } {
+    if let Some(v) = run_or_skip(&code) {
         assert_eq!(v & 0xffff_ffff, MAGIC);
     }
 }
@@ -152,15 +171,12 @@ fn stress_many_random_encodings_execute() {
     let mut executed = 0;
     for i in 0..300 {
         let code = encode(|_| {});
-        match unsafe { run(&code) } {
+        match run_or_skip(&code) {
             Some(v) => {
                 assert_eq!(v & 0xffff_ffff, MAGIC, "iteration {i} decoded incorrectly");
                 executed += 1;
             }
-            None => {
-                eprintln!("skipped: executable memory unavailable");
-                return;
-            }
+            None => return,
         }
     }
     assert_eq!(executed, 300);

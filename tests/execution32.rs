@@ -28,9 +28,10 @@ int main(int argc, char **argv) {
     fclose(f);
     long pg = sysconf(_SC_PAGESIZE);
     long len = ((n + pg - 1) / pg) * pg;
-    void *mem = mmap(0, len, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+    void *mem = mmap(0, len, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
     if (mem == MAP_FAILED) return 5;
     memcpy(mem, buf, n);
+    if (mprotect(mem, len, PROT_READ|PROT_EXEC) != 0) return 6;
     unsigned int result;
     __asm__ volatile("call *%1" : "=a"(result) : "r"(mem) : "ecx","edx","memory");
     return (result == 0x1337c0de) ? 0 : 1;
@@ -79,6 +80,10 @@ fn build_harness(dir: &Path) -> Option<PathBuf> {
     }
 }
 
+fn execution_required() -> bool {
+    std::env::var_os("SGN_REQUIRE_EXECUTION").is_some()
+}
+
 #[test]
 fn x86_shellcode_executes() {
     let dir = std::env::temp_dir().join(format!("sgn32_test_{}", std::process::id()));
@@ -87,6 +92,9 @@ fn x86_shellcode_executes() {
     let harness = match build_harness(&dir) {
         Some(h) => h,
         None => {
+            if execution_required() {
+                panic!("32-bit C toolchain is unavailable while SGN_REQUIRE_EXECUTION is set");
+            }
             eprintln!("skipped: no 32-bit C toolchain (cc -m32) available");
             return;
         }

@@ -11,14 +11,20 @@ import (
 
 var Verbose = false
 
-// checks if a byte array contains any element of another byte array
-func containsBytes(data, any []byte) bool {
+// ContainsBytes reports whether data contains any byte in the supplied set.
+func ContainsBytes(data, any []byte) bool {
 	for _, b := range any {
-		if bytes.Contains(data, []byte{b}) {
+		if bytes.IndexByte(data, b) != -1 {
 			return true
 		}
 	}
 	return false
+}
+
+// containsBytes preserves the original package-internal helper used by older
+// tests while callers migrate to ContainsBytes.
+func containsBytes(data, any []byte) bool {
+	return ContainsBytes(data, any)
 }
 
 // checks if s is ascii and printable, aka doesn't include tab, backspace, etc.
